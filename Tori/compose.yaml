@@ -1,0 +1,37 @@
+services:
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:latest
+    ports:
+      - "127.0.0.1:2333:2333"
+    restart: unless-stopped
+    environment:
+      LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:?Passwort in .env setzen}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+      _JAVA_OPTIONS: "-Xmx512m -Xms256m"
+    volumes:
+      - ./application.yml:/opt/Lavalink/application.yml:ro
+  bot:
+    build: .
+    restart: unless-stopped
+    stop_grace_period: 75s
+    depends_on:
+      - lavalink
+    env_file: .env
+    environment:
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?Bot-Token in .env setzen}
+      BOT_RESTART_EXTERNAL: "true"
+      BOT_OWNER_ID: ${BOT_OWNER_ID:-}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      MODLOG_WEBHOOK_URL: ${MODLOG_WEBHOOK_URL:-}
+      BOT_DEFAULT_LANGUAGE: ${BOT_DEFAULT_LANGUAGE:-de}
+      BOT_DATA_DIR: /app/data
+      MODLOG_DB_PATH: /app/data/moderation.db
+      LAVALINK_URI: ws://lavalink:2333
+      LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:?Passwort in .env setzen}
+    volumes:
+      - bot-data:/app/data
+
+volumes:
+  bot-data:
