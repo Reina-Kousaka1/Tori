@@ -20,4 +20,4 @@ for (const [name, key] of collections) {
     target.getCollection(name).createIndex(key, {unique: true, name: 'natural_key_v1'});
 }
 target.moderation_cases.createIndex({guild_id: 1, occurred_at: 1}, {name: 'guild_time_v1'});
-print('Tori indexes prepared. No data imported; the bot still uses its existing storage.');
+print('Tori indexes prepared. No data imported.');

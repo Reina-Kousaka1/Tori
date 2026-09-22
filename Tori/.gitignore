@@ -1,0 +1,51 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Tokens / credentials / local config
+secrets/
+config.local.*
+application-local.*
+*.key
+*.pem
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Build output
+target/
+build/
+out/
+.gradle/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime / cache
+tmp/
+temp/
+cache/
+
+# Lavalink/local runtime config if it contains passwords
+application.yml
+application.yaml
+
+# Additional existing project rules
+*.db-wal
+*.db-shm
+tools/
+runtime/
