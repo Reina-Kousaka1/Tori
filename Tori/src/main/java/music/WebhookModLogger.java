@@ -42,7 +42,7 @@ public final class WebhookModLogger implements AutoCloseable {
     @FunctionalInterface interface Sleeper { void sleep(long milliseconds) throws InterruptedException; }
 
     public static WebhookModLogger fromConfig(BotConfig config) {
-        return fromConfig(config, MongoBotStore.fromConfig(config));
+        return fromConfig(config, PostgresBotStore.fromConfig(config));
     }
 
     static WebhookModLogger fromConfig(BotConfig config, BotStore store) {

@@ -1,25 +1,27 @@
 name: tori-main
 
 services:
-  mongodb:
-    image: mongo:8.0
+  postgres:
+    image: postgres:17
     restart: unless-stopped
     ports:
-      - "127.0.0.1:27018:27017"
+      - "127.0.0.1:5432:5432"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: tori
-      MONGO_INITDB_ROOT_PASSWORD: ${TORI_MONGO_PASSWORD:?MongoDB-Passwort in .env setzen}
-      MONGO_INITDB_DATABASE: tori_main
+      POSTGRES_USER: tori
+      POSTGRES_PASSWORD: ${TORI_POSTGRES_PASSWORD:?PostgreSQL-Passwort in .env setzen}
+      POSTGRES_DB: tori_main
     volumes:
-      - mongo-data:/data/db
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --username tori --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q 1"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
       timeout: 5s
       retries: 12
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:latest
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:2334:2333"
     environment:
       LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:?Passwort in .env setzen}
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
@@ -29,12 +31,12 @@ services:
       - ./application.yml:/opt/Lavalink/application.yml:ro
   bot:
     build: .
-    restart: unless-stopped
+    restart: always
     stop_grace_period: 75s
     depends_on:
       lavalink:
         condition: service_started
-      mongodb:
+      postgres:
         condition: service_healthy
     env_file: .env
     environment:
@@ -45,9 +47,10 @@ services:
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
       MODLOG_WEBHOOK_URL: ${MODLOG_WEBHOOK_URL:-}
       BOT_DEFAULT_LANGUAGE: ${BOT_DEFAULT_LANGUAGE:-de}
-      MONGODB_URI: mongodb://tori:${TORI_MONGO_PASSWORD:?MongoDB-Passwort in .env setzen}@mongodb:27017/?authSource=admin
-      MONGODB_DATABASE: tori_main
+      TORI_DATABASE_URL: jdbc:postgresql://postgres:5432/tori_main
+      TORI_DATABASE_USER: tori
+      TORI_DATABASE_PASSWORD: ${TORI_POSTGRES_PASSWORD:?PostgreSQL-Passwort in .env setzen}
       LAVALINK_URI: ws://lavalink:2333
       LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:?Passwort in .env setzen}
 volumes:
-  mongo-data:
+  postgres-data:

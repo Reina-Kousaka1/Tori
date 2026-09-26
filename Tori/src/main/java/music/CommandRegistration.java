@@ -26,6 +26,7 @@ public final class CommandRegistration {
         var commands = new ArrayList<>(MusicBot.commands());
         commands.addAll(ModerationBot.commands());
         commands.addAll(GeneralBot.commands());
+        commands.addAll(TicketOrderBot.commands());
         commands.forEach(command -> ((SlashCommandData) command).setContexts(InteractionContextType.GUILD));
         return List.copyOf(commands);
     }

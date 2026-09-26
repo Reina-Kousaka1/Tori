@@ -25,7 +25,7 @@ class LocalizationTest {
     @ParameterizedTest @EnumSource(Language.class)
     void helpContainsEveryCommandAndFitsOneMessage(Language language) {
         var commands = new ArrayList<>(MusicBot.commands());
-        commands.addAll(ModerationBot.commands()); commands.addAll(GeneralBot.commands());
+        commands.addAll(ModerationBot.commands()); commands.addAll(GeneralBot.commands()); commands.addAll(TicketOrderBot.commands());
         String help = GeneralBot.help(language);
         assertTrue(help.length() <= 1950);
         for (var command : commands) assertTrue(help.contains("/" + command.getName()), command.getName());
@@ -41,14 +41,16 @@ class LocalizationTest {
     }
     @Test void allCommandAndOptionDescriptionsAreLocalized() throws Exception {
         var commands = new ArrayList<>(MusicBot.commands());
-        commands.addAll(ModerationBot.commands()); commands.addAll(GeneralBot.commands());
+        commands.addAll(ModerationBot.commands()); commands.addAll(GeneralBot.commands()); commands.addAll(TicketOrderBot.commands());
         for (var command : commands) {
             var json = new ObjectMapper().readTree(command.toData().toString());
             for (var language : Language.values()) {
                 String code = language == Language.EN ? "en-US" : language.code;
                 assertEquals(Messages.text(language, "cmd." + command.getName()), json.path("description_localizations").path(code).asText());
                 for (var option : json.path("options"))
-                    assertEquals(Messages.text(language, "opt." + option.path("name").asText()), option.path("description_localizations").path(code).asText());
+                    assertEquals(Messages.text(language, "opt." + option.path("name").asText()), option.path("description_localizations").path(code).asText(), command.getName()+"/"+option.path("name").asText()+"/"+code);
+                for (var subcommand : json.path("options")) for (var nested : subcommand.path("options"))
+                    assertEquals(Messages.text(language,"opt."+nested.path("name").asText()),nested.path("description_localizations").path(code).asText(),command.getName()+"/"+subcommand.path("name").asText()+"/"+nested.path("name").asText()+"/"+code);
             }
         }
     }

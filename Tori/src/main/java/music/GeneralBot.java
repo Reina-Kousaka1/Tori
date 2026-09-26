@@ -101,7 +101,7 @@ public final class GeneralBot extends CommandListener {
             Commands.slash("restart", "Restart the bot (configured bot owner only)"),
             Commands.slash("shutdown", "Shut down the bot (bot owner only)"),
             Commands.slash("uptime", "Show session uptime (bot owner only)"),
-            Commands.slash("ping", "Show WebSocket and bot REST latency in whole seconds"),
+            Commands.slash("ping", "Show WebSocket and bot REST latency in milliseconds"),
             Commands.slash("prefix", "Show or change this server's command prefix")
                 .addOption(OptionType.STRING, "value", "New prefix", false),
             Commands.slash("stats", "Show uptime, servers, members and bot version"),
@@ -217,6 +217,8 @@ public final class GeneralBot extends CommandListener {
         if (event.getName().equals("help")) return helpEmbed(language);
         if (event.getName().equals("stats")) {
             var jda = event.getJDA();
+            String inviteUrl = "https://discord.com/oauth2/authorize?client_id=" + jda.getSelfUser().getId()
+                + "&scope=bot%20applications.commands";
             var manager = jda.getShardManager();
             var guilds = manager == null ? jda.getGuildCache().asList() : manager.getGuildCache().asList();
             long members = guilds.stream().mapToLong(guild -> Math.max(0, guild.getMemberCount())).sum();
@@ -226,6 +228,7 @@ public final class GeneralBot extends CommandListener {
                 .addField(Messages.text(language, "stats.servers"), Long.toString(guilds.size()), true)
                 .addField(Messages.text(language, "stats.members"), members + "\n" + Messages.text(language, "stats.members.note"), false)
                 .addField(Messages.text(language, "stats.version"), BotVersion.CURRENT, true)
+                .addField(Messages.text(language, "stats.invite"), "[" + Messages.text(language, "stats.invite.link") + "](" + inviteUrl + ")", false)
                 ;
             if (statsStore != null) {
                 String owner = configuredOwnerId == 0 ? Messages.text(language, "stats.unset") : "<@" + configuredOwnerId + ">";
@@ -278,7 +281,7 @@ public final class GeneralBot extends CommandListener {
         return event.getName().equals("restart") ? restart : super.afterReply(event);
     }
     static String latency(Language language, long milliseconds) {
-        return milliseconds < 0 ? Messages.text(language, "ping.unavailable") : Math.round(milliseconds / 1000.0) + " s";
+        return milliseconds < 0 ? Messages.text(language, "ping.unavailable") : milliseconds + " ms";
     }
     static String sessionUptime(Instant startedAt, Instant now) {
         long seconds = Math.max(0, Duration.between(startedAt, now).getSeconds());

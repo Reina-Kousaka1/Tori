@@ -31,7 +31,7 @@ Lavalink ist ausschließlich im internen Compose-Netz erreichbar.
 
 ### Befehle im Slash-Menü registrieren
 
-Alle 23 Befehle, einschließlich `/ping` und `/status`, werden beim Bot-Start bei Discord registriert.
+Alle 30 Befehle, einschließlich `/ping`, `/status`, `/ticket` und `/order`, werden beim Bot-Start bei Discord registriert.
 Die Konsole bestätigt anschließend die von Discord akzeptierten Befehle und den Registrierungsbereich.
 Du kannst die Liste auch separat aktualisieren, ohne den Bot oder Lavalink zu starten:
 
@@ -71,7 +71,7 @@ Antworten sind im Kanal für alle sichtbar; Gründe enthalten die Moderator-ID i
 | `/language code:de` | Deutsch speichern |
 | `/language code:en` | Englisch speichern |
 | `/language code:nl` | Niederländisch speichern |
-| `/help` | Alle 23 Befehle mit kurzer Verwendung anzeigen |
+| `/help` | Befehlsübersicht mit kurzer Verwendung anzeigen |
 | `/ping` | WebSocket- und Bot-REST-Latenz in Millisekunden anzeigen |
 | `/status` | Einstellungen des rotierenden Bot-Status anzeigen (nur Bot-Inhaber) |
 | `/status action:start texts:Musik \| /help interval_ms:120000` | Statustexte alle 120000 ms wechseln |
@@ -110,9 +110,9 @@ in der neuen Sprache. Musik, Moderation, Fehlermeldungen und neue Modlogs folgen
 Nutzernamen, Songtitel und selbst eingegebene Gründe werden unverändert übernommen.
 
 Ohne gespeicherte Auswahl gilt `BOT_DEFAULT_LANGUAGE=de` aus `.env` (alternativ `en` oder `nl`).
-Die Servereinstellungen liegen in MongoDB `guild_languages` und bleiben im Docker-Volume
-`tori-main_mongo-data` über normale Neustarts und Container-Neubauten erhalten.
-`docker compose down -v` entfernt dieses Volume und damit alle gespeicherten Bot-Daten.
+Die Servereinstellungen liegen in PostgreSQL `guild_languages` und bleiben im Docker-Volume
+`postgres-data` über normale Neustarts und Container-Neubauten erhalten. Entferne dieses Volume
+nicht mit `docker compose down -v`: dadurch würden die Bot-Daten gelöscht.
 Eine fehlgeschlagene Speicherung lässt die bisherige Sprache aktiv und wird dem Nutzer gemeldet.
 
 Die Namen `/play`, `/help`, `/language` und die Optionsnamen bleiben in allen Sprachen gleich.
@@ -278,9 +278,11 @@ Bereits gesetzte Umgebungsvariablen haben Vorrang; alternativ zur Datei kannst d
 Die Datei wird bei jedem Bot-Start neu eingelesen. `.env.example` dient nur als Vorlage.
 Für lokale `.env`-Werte keine oder doppelte Anführungszeichen verwenden; `${...}`-Verweise werden nicht expandiert.
 Unter Linux/macOS `sh gradlew ...` und bei Bedarf `export` für Umgebungsvariablen nutzen.
-`LAVALINK_URI` ist lokal standardmäßig `ws://localhost:2333`; für einen anderen Server in `.env` setzen.
-Für lokal gestartete Bots unter `services.lavalink` in `compose.yaml` ergänzen:
-`ports: ["127.0.0.1:2333:2333"]`, dann `docker compose up -d lavalink`.
+`LAVALINK_URI` ist lokal standardmäßig `ws://localhost:2334`; für einen anderen Server in `.env` setzen.
+Lavalink veröffentlicht den Container-Port `2333` in `compose.yaml` auf Host-Port `2334` ausschließlich auf `127.0.0.1`, damit lokal
+gestartete Bots ihn erreichen können. Bot und Lavalink verwenden denselben `LAVALINK_PASSWORD`
+Eintrag aus `.env`; nach Passwortänderungen Lavalink mit `docker compose up -d --force-recreate lavalink`
+neu erstellen.
 Spotify-Credentials verbleiben in der Lavalink-Umgebung; die Java-Anwendung benötigt sie nicht.
 
 Die ausführbare Distribution liegt nach dem Build unter `build/install/discord-music-bot`.
@@ -312,7 +314,7 @@ Set `BOT_OWNER_ID` in `.env` to your Discord **user ID** (Developer Mode > Copy 
 `/status` uses only the same configured ID and is disabled when it is unset.
 `/help` lists both commands in the owner section.
 
-`/restart` acknowledges the owner command and persists `BOT_STOPPED` with reason `RESTART` in MongoDB.
+`/restart` acknowledges the owner command and persists `BOT_STOPPED` with reason `RESTART` in PostgreSQL.
 The existing command workers, music players, voice connections, webhook service, Lavalink client and JDA are closed,
 then Docker starts a fresh process through `restart: unless-stopped` (`BOT_RESTART_EXTERNAL=true` in Compose).
 A local IDE/Gradle launch creates a new bot session after successful cleanup and reloads .env. Startup or cleanup failures stop the process instead of retrying indefinitely. Code changes still require a new build and launch.
@@ -337,13 +339,17 @@ Snipe shows the latest cached deletion in the current channel (text and attachme
 Bot/webhook messages are not cached. Restart clears the cache. Mentions in replies do not send notifications.
 ## Moderation database
 
-Moderation cases, guild prefixes, language settings and lifecycle statistics are stored in Main Tori's dedicated MongoDB container. Configure a private password in `.env`:
+Ticket panels, private tickets, real customer orders, and the order queue are described in
+[docs/TICKETS-AND-ORDERS.md](docs/TICKETS-AND-ORDERS.md). They use separate PostgreSQL tables
+and do not read or modify economy/shop data.
+
+Moderation cases, guild prefixes, language settings, lifecycle statistics, tickets and orders are stored in Main Tori's PostgreSQL service. Configure a private password in `.env`:
 
 ```dotenv
-TORI_MONGO_PASSWORD=REPLACE_WITH_LONG_RANDOM_PASSWORD
+TORI_POSTGRES_PASSWORD=REPLACE_WITH_LONG_RANDOM_PASSWORD
 ```
 
-Compose connects the bot to `mongodb:27017` internally and stores database files in `tori-main_mongo-data`. For local Java runs, set `MONGODB_URI` and `MONGODB_DATABASE` as described in [the MongoDB migration guide](migration/mongodb/README.md). Existing SQLite data must be imported before starting the MongoDB-backed bot.
+Compose connects the bot to `postgres:5432` internally and stores database files in the `postgres-data` volume. PostgreSQL schema upgrades run automatically at bot startup using Flyway. The Mongo-to-PostgreSQL migration procedure is documented in [the migration guide](migration/mongodb/README.md); do not start the new bot against production until the source has been copied and checked.
 
 The `moderation_cases` table stores the case and server IDs, action, channel, moderator, target, reason, result,
 time and language. It also tracks `webhook_status`, `webhook_attempts`, `webhook_http_status`,
@@ -359,16 +365,18 @@ Queued cases survive as database records, but are not automatically resent after
 Database initialization errors stop startup. Runtime database errors are logged without private configuration;
 they do not undo completed moderation or prevent a webhook attempt.
 
-Example read-only query in mongosh:
+Example read-only query with `psql`:
 
-```javascript
-db.moderation_cases.find({guild_id: 'YOUR_SERVER_ID'},
-  {occurred_at: 1, action: 1, moderator_id: 1, target: 1, reason: 1, result: 1,
-   webhook_status: 1, webhook_attempts: 1, webhook_http_status: 1})
-  .sort({occurred_at: -1}).limit(50);
+```sql
+SELECT occurred_at, action, moderator_id, target, reason, result,
+       webhook_status, webhook_attempts, webhook_http_status
+FROM moderation_cases
+WHERE guild_id = 'YOUR_SERVER_ID'
+ORDER BY occurred_at DESC
+LIMIT 50;
 ```
 
-Records have no automatic expiration. Back up the dedicated MongoDB volume with `mongodump`; it is not committed to Git.
+Records have no automatic expiration. Back up PostgreSQL using `pg_dump` before maintenance; database volumes and backups are not committed to Git.
 ## Help and avatars
 
 `/help` shows a public embed with Music, Moderation, General and Owner sections in the server language.
@@ -377,16 +385,16 @@ Anyone can use it; the target does not need to be a member of the current server
 Default avatars and animated avatars are supported. The bot needs **Embed Links** in the channel to display embeds.
 Rebuild and relaunch once to register `/avatar` and load the new help layout. No new `.env` settings are needed.
 
-### MongoDB lifecycle events
+### PostgreSQL lifecycle events
 
-The `bot_events` collection stores `session_id`, `event_type`, `reason`, `occurred_at`, `started_at`.
+The `bot_events` table stores `session_id`, `event_type`, `reason`, `occurred_at`, `started_at`.
 A unique `(session_id, event_type)` key prevents repeated restart requests or a shutdown hook from duplicating events.
 Successful process starts get `BOT_STARTED`; orderly stops get `BOT_STOPPED` (`RESTART` for the owner command, `SHUTDOWN` for other orderly exits).
 An abrupt kill or machine crash cannot run shutdown cleanup or guarantee a stop event.
 Existing moderation records are retained after the explicit import.
 
-```javascript
-db.bot_events.find().sort({occurred_at: -1}).limit(20);
+```sql
+SELECT * FROM bot_events ORDER BY occurred_at DESC LIMIT 20;
 ```
 
 ### /stats
@@ -397,12 +405,12 @@ Zeigt Sitzungslaufzeit, Serveranzahl, summierte Mitgliederzahl (inklusive Bots u
 
 Die Standardsuche von /play ist YouTube. source:SoundCloud bleibt auswählbar. YouTube- und SoundCloud-Titel werden unmittelbar vor der Wiedergabe mit yt-dlp als Audiostream aufgelöst; die Warteschlange behält die ursprünglichen Titel. Lavalink benötigt youtube-plugin 1.18.2 für Metadaten und die aktivierte HTTP-Quelle für Audio.
 
-Beim lokalen Windows-Start liegen die Audiohelfer unter tools/yt-dlp.exe und tools/node.exe. Andere Installationen können YTDLP_PATH und YTDLP_JS_RUNTIME (zum Beispiel node oder node:C:/Tools/node.exe) in .env setzen. Docker enthält die Helfer im Image (Linux x86-64). Downloads stammen aus dem offiziellen yt-dlp-Projekt; die im Dockerfile festgelegte Version wird per SHA-256 geprüft. Eingeschränkte oder nicht verfügbare Videos werden als Fehler gemeldet.
+Beim lokalen Windows-Start liegen die Audiohelfer unter tools/yt-dlp.exe und tools/node.exe. Andere Installationen können YTDLP_PATH und YTDLP_JS_RUNTIME (zum Beispiel node oder node:C:/Tools/node.exe) in .env setzen. Das Docker-Image unterstützt Linux amd64 und arm64; die passende yt-dlp-Version wird architekturspezifisch geladen und per SHA-256 geprüft. Eingeschränkte oder nicht verfügbare Videos werden als Fehler gemeldet.
 # Datenbankgestützte Bot-Statistik
 
-`/stats` zeigt aktuelle Laufzeit, Server-/Mitgliederzahl, Version, den aufrufenden Server und Kanal, Bot-Owner, Ersteller und Java/JDA/Lavalink. Der Footer kennzeichnet die Antwort als Bot-Nachricht. `BOT_OWNER_ID` bestimmt den Owner; `BOT_CREATOR` setzt den frei wählbaren Ersteller-Namen. Fehlende Angaben werden als nicht konfiguriert angezeigt.
+`/stats` zeigt aktuelle Laufzeit, Server-/Mitgliederzahl, Version, den aufrufenden Server und Kanal, Bot-Owner, Ersteller und Java/JDA/Lavalink. Es enthält auch einen dynamischen Discord-Einladungslink für die laufende Bot-Anwendung. Der Footer kennzeichnet die Antwort als Bot-Nachricht. `BOT_OWNER_ID` bestimmt den Owner; `BOT_CREATOR` setzt den frei wählbaren Ersteller-Namen. Fehlende Angaben werden als nicht konfiguriert angezeigt.
 
-MongoDB `tori_main` enthält zusätzlich `bot_stats_context`. Pro Bot, Server und aufrufendem Kanal wird der neueste Name und Zeitstempel gespeichert. Nachrichteninhalte werden dafür nicht gespeichert. Startanzahl und letzter angeforderter Neustart stammen aus `bot_events` und bleiben über Neustarts erhalten. Diese Historie bezieht sich auf die Bot-Installation, die diese Datenbank verwendet.
+PostgreSQL `tori_main` enthält zusätzlich `bot_stats_context`. Pro Bot, Server und aufrufendem Kanal wird der neueste Name und Zeitstempel gespeichert. Nachrichteninhalte werden dafür nicht gespeichert. Startanzahl und letzter angeforderter Neustart stammen aus `bot_events` und bleiben über Neustarts erhalten. Diese Historie bezieht sich auf die Bot-Installation, die diese Datenbank verwendet.
 
 Jeder Aufruf aktualisiert die Statistik; bereits gesendete Embeds ändern sich nicht automatisch. Bei einem Datenbankfehler bleibt die aktuelle Statistik sichtbar und meldet den Speicherfehler. `/restart` ist weiterhin nur für den konfigurierten Bot-Owner zugänglich; eine Statistikabfrage löst keinen Neustart aus.
 # YouTube und Lyrics
@@ -420,7 +428,7 @@ Alle registrierten Commands sind zusätzlich als normale Nachrichten verfügbar.
 - `T.stats`, `T.queue`, `T.skip`, `T.pause`, `T.resume`
 - `T.prefix ?` oder `/prefix value:?` speichert einen neuen Prefix für diesen Server. `T.prefix` bzw. `/prefix` zeigt den aktuellen Wert. Zum Zurücksetzen `/prefix value:T.` verwenden.
 
-Prefixe dürfen 1–10 Buchstaben, Ziffern oder unterstützte Satzzeichen enthalten, z. B. `t!`. Änderungen erfordern **Server verwalten**. Die MongoDB-Collection `guild_prefixes` speichert sie dauerhaft. Nach einer Änderung gilt sofort nur noch der neue Prefix; Slash-Commands bleiben erreichbar.
+Prefixe dürfen 1–10 Buchstaben, Ziffern oder unterstützte Satzzeichen enthalten, z. B. `t!`. Änderungen erfordern **Server verwalten**. Die PostgreSQL-Tabelle `guild_prefixes` speichert sie dauerhaft. Nach einer Änderung gilt sofort nur noch der neue Prefix; Slash-Commands bleiben erreichbar.
 
 Argumente folgen der Reihenfolge der Slash-Optionen. Suchtexte, Gründe und Status-Texte dürfen Leerzeichen enthalten. Mit `--optionsname wert` lassen sich Optionen ausdrücklich setzen, z. B. `T.status start --texts Music | Volleyball --interval_ms 120000`. `T.timeout @Mitglied 5 Spam` verwendet dieselben Rechte- und Hierarchieprüfungen wie `/timeout`. `T.restart` bleibt auf den Bot-Owner beschränkt und startet erst nach erfolgreicher Antwort neu. Bots, Webhooks und DMs lösen keine Prefix-Commands aus.
 
