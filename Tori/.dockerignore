@@ -1,0 +1,11 @@
+.env
+.gradle
+build
+.git
+data
+
+*.db
+*.db-wal
+*.db-shm
+tools/
+runtime/

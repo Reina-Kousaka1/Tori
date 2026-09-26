@@ -5,7 +5,7 @@ import java.sql.*;
 import java.time.Instant;
 
 /** Local moderation audit database. Webhook credentials and response bodies are never stored. */
-final class ModLogStore {
+final class ModLogStore implements BotStore {
     private final String jdbcUrl;
 
     static ModLogStore fromConfig(BotConfig config) {
@@ -69,9 +69,7 @@ final class ModLogStore {
         }
     }
 
-    record Stats(long starts, String lastRestart) {}
-
-    Stats stats(String botId, String guildId, String guildName, String channelId, String channelName) throws SQLException {
+    public BotStore.Stats stats(String botId, String guildId, String guildName, String channelId, String channelName) throws SQLException {
         try (var connection = connect()) {
             try (var sql = connection.prepareStatement("""
                 INSERT INTO bot_stats_context VALUES (?, ?, ?, ?, ?, ?)
@@ -88,7 +86,7 @@ final class ModLogStore {
                 FROM bot_events
                 """)) {
                 result.next();
-                return new Stats(result.getLong(1), result.getString(2));
+                return new BotStore.Stats(result.getLong(1), result.getString(2));
             }
         }
     }
@@ -99,7 +97,7 @@ final class ModLogStore {
         return DriverManager.getConnection(jdbcUrl, properties);
     }
 
-    void lifecycle(String sessionId, String eventType, String reason, Instant startedAt) throws SQLException {
+    public void lifecycle(String sessionId, String eventType, String reason, Instant startedAt) throws SQLException {
         if (!java.util.Set.of("BOT_STARTED", "BOT_STOPPED").contains(eventType))
             throw new IllegalArgumentException("Unsupported bot lifecycle event");
         try (var connection = connect(); var sql = connection.prepareStatement("""
@@ -115,7 +113,7 @@ final class ModLogStore {
         }
     }
 
-    boolean save(WebhookModLogger.Entry entry, boolean webhookEnabled) throws SQLException {
+    public boolean save(WebhookModLogger.Entry entry, boolean webhookEnabled) throws SQLException {
         try (var connection = connect(); var sql = connection.prepareStatement("""
                 INSERT INTO moderation_cases
                 (guild_id, case_id, action, guild_name, channel_id, moderator_id, moderator_name,
@@ -131,7 +129,7 @@ final class ModLogStore {
         }
     }
 
-    void update(WebhookModLogger.Entry entry, String status, Integer httpStatus, String error, boolean attempt) throws SQLException {
+    public void update(WebhookModLogger.Entry entry, String status, Integer httpStatus, String error, boolean attempt) throws SQLException {
         try (var connection = connect(); var sql = connection.prepareStatement("""
                 UPDATE moderation_cases SET webhook_status = ?, webhook_http_status = ?, webhook_error = ?,
                     webhook_attempts = webhook_attempts + ?, webhook_updated_at = ?
@@ -145,6 +143,24 @@ final class ModLogStore {
             sql.setString(6, entry.guildId());
             sql.setString(7, entry.caseId());
             sql.executeUpdate();
+        }
+    }
+
+    public java.util.Map<String, String> prefixes() throws SQLException {
+        var loaded = new java.util.HashMap<String, String>();
+        try (var connection = connect(); var sql = connection.createStatement()) {
+            sql.execute("CREATE TABLE IF NOT EXISTS guild_prefixes (guild_id TEXT PRIMARY KEY, prefix TEXT NOT NULL)");
+            try (var rows = sql.executeQuery("SELECT guild_id, prefix FROM guild_prefixes")) {
+                while (rows.next()) loaded.put(rows.getString(1), rows.getString(2));
+            }
+        }
+        return loaded;
+    }
+
+    public void setPrefix(String guildId, String prefix) throws SQLException {
+        try (var connection = connect(); var sql = connection.prepareStatement(
+            "INSERT INTO guild_prefixes VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET prefix=excluded.prefix")) {
+            sql.setString(1, guildId); sql.setString(2, prefix); sql.executeUpdate();
         }
     }
 }

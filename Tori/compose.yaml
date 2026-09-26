@@ -1,9 +1,27 @@
+name: tori-main
+
 services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: tori
+      POSTGRES_PASSWORD: ${TORI_POSTGRES_PASSWORD:?PostgreSQL-Passwort in .env setzen}
+      POSTGRES_DB: tori_main
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:latest
-    ports:
-      - "127.0.0.1:2333:2333"
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:2334:2333"
     environment:
       LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:?Passwort in .env setzen}
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
@@ -13,10 +31,13 @@ services:
       - ./application.yml:/opt/Lavalink/application.yml:ro
   bot:
     build: .
-    restart: unless-stopped
+    restart: always
     stop_grace_period: 75s
     depends_on:
-      - lavalink
+      lavalink:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     env_file: .env
     environment:
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
@@ -26,12 +47,10 @@ services:
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
       MODLOG_WEBHOOK_URL: ${MODLOG_WEBHOOK_URL:-}
       BOT_DEFAULT_LANGUAGE: ${BOT_DEFAULT_LANGUAGE:-de}
-      BOT_DATA_DIR: /app/data
-      MODLOG_DB_PATH: /app/data/moderation.db
+      TORI_DATABASE_URL: jdbc:postgresql://postgres:5432/tori_main
+      TORI_DATABASE_USER: tori
+      TORI_DATABASE_PASSWORD: ${TORI_POSTGRES_PASSWORD:?PostgreSQL-Passwort in .env setzen}
       LAVALINK_URI: ws://lavalink:2333
       LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:?Passwort in .env setzen}
-    volumes:
-      - bot-data:/app/data
-
 volumes:
-  bot-data:
+  postgres-data:

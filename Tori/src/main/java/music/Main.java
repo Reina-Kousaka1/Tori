@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class Main implements AutoCloseable {
     private final Instant startedAt;
     private final String sessionId = UUID.randomUUID().toString();
-    private final ModLogStore store;
+    private final BotStore store;
     private final CountDownLatch stopRequested = new CountDownLatch(1);
     private final CountDownLatch shutdownFinished = new CountDownLatch(1);
     private final AtomicBoolean closing = new AtomicBoolean();
@@ -27,10 +27,11 @@ public final class Main implements AutoCloseable {
     private MusicBot music;
     private ModerationBot moderation;
     private GeneralBot general;
+    private TicketOrderBot ticketOrders;
     private WebhookModLogger modlog;
     private JDA jda;
 
-    Main(Instant startedAt, ModLogStore store) {
+    Main(Instant startedAt, BotStore store) {
         this.startedAt = startedAt;
         this.store = store;
     }
@@ -48,7 +49,7 @@ public final class Main implements AutoCloseable {
                     CommandRegistration.register(config.required("DISCORD_TOKEN"), config.get("DISCORD_GUILD_ID"));
                     return;
                 }
-                bot = new Main(Instant.now(), ModLogStore.fromConfig(config));
+                bot = new Main(Instant.now(), PostgresBotStore.fromConfig(config));
                 Main running = bot;
                 shutdownHook = new Thread(running::close, "bot-shutdown");
                 Runtime.getRuntime().addShutdownHook(shutdownHook);
@@ -80,7 +81,7 @@ public final class Main implements AutoCloseable {
         jda.awaitReady();
         CommandRegistration.register(jda, config.get("DISCORD_GUILD_ID"));
         client.addNode(new NodeOptions.Builder().setName("music")
-            .setServerUri(config.get("LAVALINK_URI", "ws://localhost:2333"))
+            .setServerUri(config.get("LAVALINK_URI", "ws://localhost:2334"))
             .setPassword(config.required("LAVALINK_PASSWORD")).build());
         recordStarted();
         System.out.println("Java Music- und Moderationsbot ist bereit.");
@@ -95,7 +96,8 @@ public final class Main implements AutoCloseable {
         long botId;
         try { botId = Long.parseLong(new String(Base64.getUrlDecoder().decode(token.split("\\.")[0]), StandardCharsets.UTF_8)); }
         catch (Exception ex) { throw new IllegalArgumentException("DISCORD_TOKEN has an invalid format."); }
-        LanguageStore languages = LanguageStore.fromConfig(config);
+        LanguageStore languages = store instanceof PostgresBotStore
+            ? LanguageStore.fromStore(config, store) : LanguageStore.fromConfig(config);
         client = new LavalinkClient(botId);
         music = new MusicBot(client, languages, new YouTubeSearch(config.get("YOUTUBE_API_KEY")), YtDlp.fromConfig(config));
         modlog = WebhookModLogger.fromConfig(config, store);
@@ -103,12 +105,17 @@ public final class Main implements AutoCloseable {
         var prefixes = new PrefixSettings(store);
         general = new GeneralBot(languages, new StatusRotation(), ownerId, this::requestRestart, startedAt)
             .withStats(store, config.get("BOT_CREATOR", "")).withPrefixes(prefixes).withShutdown(this::requestShutdown);
+        if (store instanceof PostgresBotStore postgres) ticketOrders = new TicketOrderBot(languages, new TicketOrderStore(postgres.database()));
+        var listeners = new java.util.ArrayList<Object>();
+        listeners.addAll(java.util.List.of(music, moderation, moderation.snipes, general));
+        if (ticketOrders != null) listeners.add(ticketOrders);
+        listeners.add(new PrefixCommands(prefixes, music, moderation, general));
         jda = JDABuilder.createDefault(token)
+            .setAutoReconnect(true)
             .enableIntents(GatewayIntent.GUILD_VOICE_STATES, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT)
             .enableCache(CacheFlag.VOICE_STATE)
             .setVoiceDispatchInterceptor(new JDAVoiceUpdateListener(client))
-            .addEventListeners(music, moderation, moderation.snipes, general,
-                new PrefixCommands(prefixes, music, moderation, general)).build();
+            .addEventListeners(listeners.toArray()).build();
     }
 
     synchronized void recordStarted() throws java.sql.SQLException {
@@ -154,6 +161,7 @@ public final class Main implements AutoCloseable {
         try {
             // Cancel the normal rotation without sending a shutdown/restart presence.
             if (general != null) clean(general::close);
+            if (ticketOrders != null) clean(ticketOrders::close);
             if (music != null) clean(() -> { if (jda == null) music.close(); else music.close(jda); });
             if (moderation != null) clean(moderation::close);
             else if (modlog != null) clean(modlog::close);
@@ -166,6 +174,7 @@ public final class Main implements AutoCloseable {
                 }
             });
         } finally {
+            clean(store::close);
             shutdownFinished.countDown();
         }
     }

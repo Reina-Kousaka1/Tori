@@ -1,40 +1,48 @@
-# Vorbereitung: SQLite → MongoDB
+# One-time MongoDB to PostgreSQL migration
 
-Status: Vorbereitung, kein aktives MongoDB-Backend. Der Bot verwendet weiterhin SQLite und seine bestehende Sprachdatei. Diese Dateien werden nicht vom Bot-Start geladen. Es wurde keine Verbindung aufgebaut und kein Datensatz übertragen. PostgreSQL ist nicht Teil dieser Vorbereitung.
+Main Tori's normal runtime now uses PostgreSQL. The MongoDB Java driver exists only in the isolated `mongoMigration` Gradle source set, and is loaded only by the explicit `migrateMongoToPostgres` task. The migration reads the supported Tori collections and never updates or deletes source documents. It refuses a PostgreSQL target containing application rows and writes a JSONB archive of every copied source document in the same transaction as the relational import.
 
-## Ziel und Verbindung
+## Important before starting
 
-`connection.env.example` beschreibt die später benötigten Werte. Eine echte URI ausschließlich in einer privaten Konfiguration speichern; nicht in Git, Logs oder Chat. Die Vorlage wird aktuell von keinem Bot-Code ausgewertet. Der offizielle Java-MongoDB-Treiber und die Repository-Implementierungen werden erst bei der tatsächlichen Migration eingebunden. Ein gesetztes `MONGODB_URI` schaltet den Bot daher noch nicht um.
+- The Raspberry Pi's live MongoDB data has not been inspected from this development environment. Local SQLite/JSONL migration snapshots are not evidence about what is in the Pi's Mongo volume. Check the source database and counts on the machine/network where it is actually available.
+- Do not downgrade MongoDB, remove its container/volume, run `docker compose down -v`, or point this importer at a production PostgreSQL database that has already received bot writes.
+- Keep Main Tori stopped while taking the final source copy so the export is consistent. Preserve the original Mongo volume and a verified backup until PostgreSQL has been checked in production.
+- Do not expose MongoDB or PostgreSQL publicly to make this work. Use a private LAN/VPN or SSH tunnel with local-only port bindings. Never put passwords in Git or paste them into logs.
+- For deployment on the Pi, verify it is running a 64-bit OS (`uname -m` should report `aarch64`). PostgreSQL's official image publishes ARM64 builds, and this bot image now selects ARM64 or amd64 yt-dlp accordingly; 32-bit Pi OS is not covered by this Docker build.
+- The importer expects the existing Mongo database named `tori_main` and these Tori collections: `bot_stats_context`, `bot_events`, `guild_prefixes`, `moderation_cases`, `guild_languages`, `guild_orders`, `guild_order_status_events`, `guild_tickets`, `guild_ticket_events`, `guild_ticket_transcripts`, `guild_ticket_order_config`, and `guild_ticket_order_counters`. A nonempty unknown collection makes it abort for review rather than silently omit it.
 
-Die MongoDB-Datenbank gehört genau einer Tori-Installation. Produktions- und Dev-Datenbanken müssen getrennt bleiben.
+## Safe staged workflow
 
-## Datenzuordnung (Schema-Version 1)
+1. On the source host, stop the bot cleanly and make a database backup using the MongoDB tools available for that host/version. Keep the original volume intact. Record collection counts and retain the backup somewhere separate. For a Pi source, use its currently installed MongoDB/container tooling; do not try to install or upgrade MongoDB 8 as part of this migration.
+2. Restore a *copy* of that backup into a temporary, private MongoDB instance on a compatible migration machine, or provide a private network route to the unchanged source. Bind any temporary service to localhost only and remove it only after migration verification. Never use the production source as a scratch database.
+3. Configure a fresh PostgreSQL database with the credentials in `.env` (`TORI_POSTGRES_PASSWORD`). Start only PostgreSQL, not the bot. The Compose service maps its port to `127.0.0.1:5432`; the bot's normal config is `TORI_DATABASE_URL`, `TORI_DATABASE_USER`, and `TORI_DATABASE_PASSWORD`.
+4. In a private terminal session, provide these migration-only settings without committing them or printing them:
 
-Feldnamen und Inhalte bleiben beim ersten Import unverändert. Jede SQL-Zeile wird ein Dokument mit zusätzlichem `schema_version: 1`. Alle Discord-IDs, Fall-IDs und Session-IDs bleiben **Strings**. Bestehende ISO-Zeitstempel bleiben zunächst Strings und werden exakt übernommen; optionale SQL-NULL-Werte werden BSON-null. Zähler bleiben Zahlen. Keine Message-Inhalte oder Zugangsdaten ergänzen.
+   - `TORI_MONGO_SOURCE_URI` — private URI to the unchanged source/copy, including the correct auth settings.
+   - `TORI_MONGO_SOURCE_DATABASE=tori_main` (optional; this is the default).
+   - `TORI_DATABASE_URL=jdbc:postgresql://localhost:5432/tori_main`, `TORI_DATABASE_USER=tori`, and `TORI_DATABASE_PASSWORD` for the fresh PostgreSQL target.
 
-| Quelle | Collection | Eindeutige Felder |
-| --- | --- | --- |
-| SQLite `bot_stats_context` | `bot_stats_context` | `bot_id`, `guild_id`, `channel_id` |
-| SQLite `bot_events` | `bot_events` | `session_id`, `event_type` |
-| SQLite `guild_prefixes` | `guild_prefixes` | `guild_id` |
-| SQLite `moderation_cases` | `moderation_cases` | `guild_id`, `case_id` |
-| `BOT_DATA_DIR/languages.properties` | `guild_languages` | `guild_id` |
+   Then run `./gradlew migrateMongoToPostgres` (Windows: `./gradlew.bat migrateMongoToPostgres`). The task applies the Flyway schema, checks the target is empty, copies and maps every supported document, and commits the entire import atomically. An error rolls back the SQL transaction; the source is read-only throughout.
+5. Compare the per-collection source counts from the backup with the imported relational counts and `mongo_import_archive` counts. Check guild settings, moderation cases, ticket/order totals, status histories, transcript records, and reciprocal ticket/order links. The task prints only the total copied count; use read-only SQL and the preserved archive for detailed reconciliation.
+6. Only after manual reconciliation, back up PostgreSQL, deploy the bot configured for that database, and verify commands, tickets, order buttons, moderation logs, and restart persistence in a private test guild. Keep the Mongo backup/volume unchanged through the agreed rollback window.
 
-Für Spracheinstellungen: Properties-Schlüssel → `guild_id`, Wert → `language` (`en`, `de`, `nl`). Nicht konfigurierte Server erhalten weiterhin den konfigurierten Standard; keine künstlichen Standarddatensätze anlegen. Prefix-Standard `T.` und alle vorhandenen Serverwerte erhalten. Statistik-Historie betrifft wie bisher die Installation.
+Example read-only archive count query:
 
-## Vorbereitete Indexdatei
+```sql
+SELECT collection_name, count(*)
+FROM mongo_import_archive
+GROUP BY collection_name
+ORDER BY collection_name;
+```
 
-`prepare-indexes.js` ist für **mongosh** vorgesehen. Sie erstellt auf ausdrücklichen Aufruf Collections/Indizes, importiert aber keine Daten. Sie liest nur `MONGODB_DATABASE` und verlangt die explizite Freigabe `TORI_MONGO_PREPARE=YES`. Die Verbindung wird separat über mongosh eingerichtet. Nicht beim Bot-Start aufrufen. Unique-Indizes verhindern doppelte natürliche Schlüssel; es werden keine TTL-Indizes oder automatischen Löschungen eingerichtet.
+Example application table counts:
 
-## Späterer Umzug in Etappen
+```sql
+SELECT 'bot_events' AS table_name, count(*) FROM bot_events
+UNION ALL SELECT 'moderation_cases', count(*) FROM moderation_cases
+UNION ALL SELECT 'guild_orders', count(*) FROM guild_orders
+UNION ALL SELECT 'guild_tickets', count(*) FROM guild_tickets
+UNION ALL SELECT 'guild_ticket_transcripts', count(*) FROM guild_ticket_transcripts;
+```
 
-1. Repository-Schnittstellen für Stats/Lifecycle, Prefixe, Moderation und Sprache definieren. SQLite-Implementierungen zuerst unverändert hinter diese Schnittstellen setzen. `PrefixSettings` greift derzeit direkt auf JDBC zu; diese Kopplung vor dem Umschalten lösen.
-2. MongoDB-Treiber und entsprechende Implementierungen ergänzen. Verbindungsfehler dürfen keinen stillen Wechsel auf eine andere Datenbank auslösen. Den aktiven Speicher explizit pro migriertem Bereich konfigurieren.
-3. Zunächst Stats-Kontext **zusammen mit** Lifecycle-Lesen/-Schreiben umstellen: `/stats` liest aktuell die Ereignisse aus derselben Datenbank. Prefixe und Moderation können zunächst bei SQLite bleiben.
-4. In einer Testdatenbank einen wiederholbaren Import bauen: Upserts mit den oben genannten natürlichen Schlüsseln, keine zufälligen Import-Schlüssel. Bestehende Moderationsfälle nur übernehmen, niemals Webhooks erneut senden. Tabellen-/Collection-Zählungen und vollständige Datensatzvergleiche prüfen, einschließlich Umlauten, NULL-Werten, Zeitstempeln und langen IDs.
-5. Vor dem finalen Export Bot-Schreibzugriffe stoppen und eine konsistente SQLite-Sicherung erstellen. Bei WAL-Betrieb nicht nur die laufende `.db`-Datei kopieren. Sprachdatei ebenfalls sichern. Import mit diesem Snapshot wiederholen, vergleichen und erst dann den betreffenden Bereich umschalten. Kein unkontrolliertes paralleles Schreiben in beide Systeme.
-6. Slash- und Prefix-Commands, Restart/Lifecycle sowie Sprach- und Owner-Regeln gezielt prüfen. SQLite-Sicherung unverändert aufbewahren. Vor Rückkehr zu SQLite nach neuen MongoDB-Schreibvorgängen zuerst diese Änderungen zurückführen; einfaches Zurückschalten würde Daten verlieren.
-
-Noch zu implementieren: Java-Backend, Export/Import, Vergleichswerkzeug und Umschaltung. Diese Vorbereitung behauptet keine bereits vorhandene Migration.
-
-Offizielle Referenzen: [Verbindungsformate](https://www.mongodb.com/docs/manual/reference/connection-string/), [eindeutige Indizes](https://www.mongodb.com/docs/manual/core/index-unique/).
+This checkout cannot access or verify the Raspberry Pi's Mongo data or execute the live migration. Do not treat a successful local build as a completed data migration. The old Mongo volume is intentionally not declared in the new Compose file; Docker may report it as orphaned, but it remains untouched unless someone explicitly removes it.

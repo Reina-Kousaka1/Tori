@@ -58,6 +58,7 @@ class GeneralBotTest {
             assertEquals("4", fields.get(1).getValue());
             assertEquals("106\n" + Messages.text(Language.EN, "stats.members.note"), fields.get(2).getValue());
             assertEquals(BotVersion.CURRENT, fields.get(3).getValue());
+            assertTrue(fields.get(4).getValue().contains("client_id=423456789012345678"));
             fixture.sharded = true;
             assertEquals("106\n" + Messages.text(Language.EN, "stats.members.note"), freshProcess.handleEmbed(fixture.event("stats", CALLER), Language.EN).getFields().get(2).getValue());
             assertEquals("1d 1h 1m 1s", oldProcess.handleEmbed(event, Language.EN).getFields().getFirst().getValue());
@@ -200,8 +201,8 @@ class GeneralBotTest {
         var fixture = new Fixture();
         try (var bot = bot(new StatusRotation())) {
             String response = bot.handle(fixture.event("ping", CALLER), Language.EN);
-            assertTrue(response.contains("WebSocket: 0 s"), response);
-            assertTrue(response.contains("Bot (REST): 0 s"), response);
+            assertTrue(response.contains("WebSocket: 37 ms"), response);
+            assertTrue(response.contains("Bot (REST): 84 ms"), response);
             assertEquals(1, fixture.restPingRequests);
             assertEquals(0, fixture.ownerLookups, "Public ping must not depend on application ownership");
             assertEquals(0, fixture.presenceAccesses.get());
@@ -215,7 +216,7 @@ class GeneralBotTest {
             String response = bot.handle(fixture.event("ping", CALLER), Language.EN);
             assertFalse(response.contains("-1"), response);
             assertTrue(response.contains(Messages.text(Language.EN, "ping.unavailable")), response);
-            assertTrue(response.contains("0 s"), response);
+            assertTrue(response.contains("Bot (REST): 84 ms"), response);
             assertEquals(1, fixture.restPingRequests);
         }
     }
@@ -494,6 +495,7 @@ class GeneralBotTest {
                 default -> throw unexpected(method);
             });
             var jda = stub(JDA.class, (proxy, method, args) -> switch (method.getName()) {
+                case "getSelfUser" -> selfUser();
                 case "getShardManager" -> sharded ? manager : null;
                 case "getGuildCache" -> guilds;
                 case "getShardInfo" -> new JDA.ShardInfo(0, shardCount);
@@ -585,6 +587,15 @@ class GeneralBotTest {
             case "getEffectiveAvatarUrl" -> "https://cdn.discordapp.com/avatars/" + id + "/a_test.gif";
             case "getIdLong" -> id;
             case "getId" -> Long.toString(id);
+            default -> throw unexpected(method);
+        });
+    }
+
+    private static net.dv8tion.jda.api.entities.SelfUser selfUser() {
+        return stub(net.dv8tion.jda.api.entities.SelfUser.class, (proxy, method, args) -> switch (method.getName()) {
+            case "getId" -> "423456789012345678";
+            case "getIdLong" -> 423456789012345678L;
+            case "getName" -> "Test Bot";
             default -> throw unexpected(method);
         });
     }

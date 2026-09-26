@@ -17,9 +17,33 @@ public final class LocalizedCommands {
                     slash.setDescriptionLocalization(locale, Messages.text(language, key));
                     for (var option : slash.getOptions())
                         option.setDescriptionLocalization(locale, Messages.text(language, "opt." + option.getName()));
+                    for (var subcommand : slash.getSubcommands()) {
+                        subcommand.setDescriptionLocalization(locale, Messages.text(language, "opt." + subcommand.getName()));
+                        for (var option : subcommand.getOptions())
+                            option.setDescriptionLocalization(locale, Messages.text(language, "opt." + option.getName()));
+                    }
+                    for (var group : slash.getSubcommandGroups()) {
+                        group.setDescriptionLocalization(locale, Messages.text(language, "opt." + group.getName()));
+                        for (var subcommand : group.getSubcommands()) {
+                            subcommand.setDescriptionLocalization(locale, Messages.text(language, "opt." + subcommand.getName()));
+                            for (var option : subcommand.getOptions())
+                                option.setDescriptionLocalization(locale, Messages.text(language, "opt." + option.getName()));
+                        }
+                    }
                 }
             }
             for (var option : slash.getOptions()) option.setDescription(Messages.text(Language.EN, "opt." + option.getName()));
+            for (var subcommand : slash.getSubcommands()) {
+                subcommand.setDescription(Messages.text(Language.EN, "opt." + subcommand.getName()));
+                for (var option : subcommand.getOptions()) option.setDescription(Messages.text(Language.EN, "opt." + option.getName()));
+            }
+            for (var group : slash.getSubcommandGroups()) {
+                group.setDescription(Messages.text(Language.EN, "opt." + group.getName()));
+                for (var subcommand : group.getSubcommands()) {
+                    subcommand.setDescription(Messages.text(Language.EN, "opt." + subcommand.getName()));
+                    for (var option : subcommand.getOptions()) option.setDescription(Messages.text(Language.EN, "opt." + option.getName()));
+                }
+            }
         }
         return commands;
     }
