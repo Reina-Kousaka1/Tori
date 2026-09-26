@@ -14,7 +14,8 @@ dependencies {
     implementation 'net.dv8tion:JDA:6.5.0'
     implementation 'dev.arbjerg:lavalink-client:3.4.0'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.20.1'
-    runtimeOnly 'org.xerial:sqlite-jdbc:3.53.4.0'
+    implementation 'org.mongodb:mongodb-driver-sync:5.6.1'
+    testRuntimeOnly 'org.xerial:sqlite-jdbc:3.53.4.0'
     runtimeOnly 'org.slf4j:slf4j-simple:2.0.17'
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'

@@ -18,7 +18,7 @@ public final class WebhookModLogger implements AutoCloseable {
     private final URI endpoint;
     private final Transport transport;
     private final Sleeper sleeper;
-    private final ModLogStore store;
+    private final BotStore store;
     private HttpClient ownedClient;
     private Instant pauseUntil = Instant.MIN; // Accessed only by the delivery worker.
     private final ThreadPoolExecutor worker = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
@@ -42,10 +42,10 @@ public final class WebhookModLogger implements AutoCloseable {
     @FunctionalInterface interface Sleeper { void sleep(long milliseconds) throws InterruptedException; }
 
     public static WebhookModLogger fromConfig(BotConfig config) {
-        return fromConfig(config, ModLogStore.fromConfig(config));
+        return fromConfig(config, MongoBotStore.fromConfig(config));
     }
 
-    static WebhookModLogger fromConfig(BotConfig config, ModLogStore store) {
+    static WebhookModLogger fromConfig(BotConfig config, BotStore store) {
         validateEndpoint(config.get("MODLOG_WEBHOOK_URL"));
         HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5))
             .followRedirects(HttpClient.Redirect.NEVER).build();
@@ -64,7 +64,7 @@ public final class WebhookModLogger implements AutoCloseable {
         this(url, transport, sleeper, null);
     }
 
-    WebhookModLogger(String url, Transport transport, Sleeper sleeper, ModLogStore store) {
+    WebhookModLogger(String url, Transport transport, Sleeper sleeper, BotStore store) {
         this.endpoint = validateEndpoint(url);
         this.transport = transport;
         this.sleeper = sleeper;

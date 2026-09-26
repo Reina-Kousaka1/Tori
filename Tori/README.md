@@ -110,10 +110,9 @@ in der neuen Sprache. Musik, Moderation, Fehlermeldungen und neue Modlogs folgen
 Nutzernamen, Songtitel und selbst eingegebene Gründe werden unverändert übernommen.
 
 Ohne gespeicherte Auswahl gilt `BOT_DEFAULT_LANGUAGE=de` aus `.env` (alternativ `en` oder `nl`).
-Die Servereinstellungen liegen in `data/languages.properties`; Docker Compose speichert sie im
-Volume `bot-data`, sodass sie normale Neustarts und Container-Neubauten überstehen.
-`docker compose down -v` entfernt dieses Volume und damit die gespeicherten Sprachen.
-Bei lokalem Java-Start kann `BOT_DATA_DIR` den Datenordner ändern. Nur einen Bot-Prozess je Datenordner betreiben.
+Die Servereinstellungen liegen in MongoDB `guild_languages` und bleiben im Docker-Volume
+`tori-main_mongo-data` über normale Neustarts und Container-Neubauten erhalten.
+`docker compose down -v` entfernt dieses Volume und damit alle gespeicherten Bot-Daten.
 Eine fehlgeschlagene Speicherung lässt die bisherige Sprache aktiv und wird dem Nutzer gemeldet.
 
 Die Namen `/play`, `/help`, `/language` und die Optionsnamen bleiben in allen Sprachen gleich.
@@ -313,7 +312,7 @@ Set `BOT_OWNER_ID` in `.env` to your Discord **user ID** (Developer Mode > Copy 
 `/status` uses only the same configured ID and is disabled when it is unset.
 `/help` lists both commands in the owner section.
 
-`/restart` acknowledges the owner command and persists `BOT_STOPPED` with reason `RESTART` in SQLite.
+`/restart` acknowledges the owner command and persists `BOT_STOPPED` with reason `RESTART` in MongoDB.
 The existing command workers, music players, voice connections, webhook service, Lavalink client and JDA are closed,
 then Docker starts a fresh process through `restart: unless-stopped` (`BOT_RESTART_EXTERNAL=true` in Compose).
 A local IDE/Gradle launch creates a new bot session after successful cleanup and reloads .env. Startup or cleanup failures stop the process instead of retrying indefinitely. Code changes still require a new build and launch.
@@ -338,16 +337,13 @@ Snipe shows the latest cached deletion in the current channel (text and attachme
 Bot/webhook messages are not cached. Restart clears the cache. Mentions in replies do not send notifications.
 ## Moderation database
 
-Moderation cases are stored in SQLite before webhook delivery is queued. The table is created automatically at startup.
-Local configuration in `.env`:
+Moderation cases, guild prefixes, language settings and lifecycle statistics are stored in Main Tori's dedicated MongoDB container. Configure a private password in `.env`:
 
 ```dotenv
-MODLOG_DB_PATH=data/moderation.db
+TORI_MONGO_PASSWORD=REPLACE_WITH_LONG_RANDOM_PASSWORD
 ```
 
-An omitted or blank path defaults to `BOT_DATA_DIR/moderation.db` (`data/moderation.db` locally).
-Docker uses `/app/data/moderation.db` in the existing persistent `bot-data` volume, regardless of the local path.
-No database server or database password is required. Relaunch/rebuild the bot once to load this change.
+Compose connects the bot to `mongodb:27017` internally and stores database files in `tori-main_mongo-data`. For local Java runs, set `MONGODB_URI` and `MONGODB_DATABASE` as described in [the MongoDB migration guide](migration/mongodb/README.md). Existing SQLite data must be imported before starting the MongoDB-backed bot.
 
 The `moderation_cases` table stores the case and server IDs, action, channel, moderator, target, reason, result,
 time and language. It also tracks `webhook_status`, `webhook_attempts`, `webhook_http_status`,
@@ -363,19 +359,16 @@ Queued cases survive as database records, but are not automatically resent after
 Database initialization errors stop startup. Runtime database errors are logged without private configuration;
 they do not undo completed moderation or prevent a webhook attempt.
 
-Example read-only query in a SQLite client:
+Example read-only query in mongosh:
 
-```sql
-SELECT occurred_at, action, moderator_id, target, reason, result,
-       webhook_status, webhook_attempts, webhook_http_status
-FROM moderation_cases
-WHERE guild_id = 'YOUR_SERVER_ID'
-ORDER BY occurred_at DESC
-LIMIT 50;
+```javascript
+db.moderation_cases.find({guild_id: 'YOUR_SERVER_ID'},
+  {occurred_at: 1, action: 1, moderator_id: 1, target: 1, reason: 1, result: 1,
+   webhook_status: 1, webhook_attempts: 1, webhook_http_status: 1})
+  .sort({occurred_at: -1}).limit(50);
 ```
 
-Records have no automatic expiration. Back up the database using a SQLite-aware backup tool,
-or stop the bot before copying the database and any WAL files. Database files are excluded from Git and Docker builds.
+Records have no automatic expiration. Back up the dedicated MongoDB volume with `mongodump`; it is not committed to Git.
 ## Help and avatars
 
 `/help` shows a public embed with Music, Moderation, General and Owner sections in the server language.
@@ -384,18 +377,16 @@ Anyone can use it; the target does not need to be a member of the current server
 Default avatars and animated avatars are supported. The bot needs **Embed Links** in the channel to display embeds.
 Rebuild and relaunch once to register `/avatar` and load the new help layout. No new `.env` settings are needed.
 
-### SQLite lifecycle events
+### MongoDB lifecycle events
 
-The existing SQLite store also creates `bot_events` alongside `moderation_cases`; no database engine migration is performed.
-Columns: `session_id`, `event_type`, `reason`, `occurred_at`, `started_at`.
+The `bot_events` collection stores `session_id`, `event_type`, `reason`, `occurred_at`, `started_at`.
 A unique `(session_id, event_type)` key prevents repeated restart requests or a shutdown hook from duplicating events.
 Successful process starts get `BOT_STARTED`; orderly stops get `BOT_STOPPED` (`RESTART` for the owner command, `SHUTDOWN` for other orderly exits).
 An abrupt kill or machine crash cannot run shutdown cleanup or guarantee a stop event.
-The existing moderation records and webhook delivery behavior are retained.
+Existing moderation records are retained after the explicit import.
 
-```sql
-SELECT event_type, reason, occurred_at, started_at, session_id
-FROM bot_events ORDER BY rowid DESC LIMIT 20;
+```javascript
+db.bot_events.find().sort({occurred_at: -1}).limit(20);
 ```
 
 ### /stats
@@ -411,7 +402,7 @@ Beim lokalen Windows-Start liegen die Audiohelfer unter tools/yt-dlp.exe und too
 
 `/stats` zeigt aktuelle Laufzeit, Server-/Mitgliederzahl, Version, den aufrufenden Server und Kanal, Bot-Owner, Ersteller und Java/JDA/Lavalink. Der Footer kennzeichnet die Antwort als Bot-Nachricht. `BOT_OWNER_ID` bestimmt den Owner; `BOT_CREATOR` setzt den frei wählbaren Ersteller-Namen. Fehlende Angaben werden als nicht konfiguriert angezeigt.
 
-Die vorhandene SQLite-Datei (`MODLOG_DB_PATH`, sonst `BOT_DATA_DIR/moderation.db`) enthält zusätzlich `bot_stats_context`. Pro Bot, Server und aufrufendem Kanal wird der neueste Name und Zeitstempel gespeichert. Nachrichteninhalte werden dafür nicht gespeichert. Startanzahl und letzter angeforderter Neustart stammen aus `bot_events` und bleiben über Neustarts erhalten. Diese Historie bezieht sich auf die Bot-Installation, die diese Datenbank verwendet.
+MongoDB `tori_main` enthält zusätzlich `bot_stats_context`. Pro Bot, Server und aufrufendem Kanal wird der neueste Name und Zeitstempel gespeichert. Nachrichteninhalte werden dafür nicht gespeichert. Startanzahl und letzter angeforderter Neustart stammen aus `bot_events` und bleiben über Neustarts erhalten. Diese Historie bezieht sich auf die Bot-Installation, die diese Datenbank verwendet.
 
 Jeder Aufruf aktualisiert die Statistik; bereits gesendete Embeds ändern sich nicht automatisch. Bei einem Datenbankfehler bleibt die aktuelle Statistik sichtbar und meldet den Speicherfehler. `/restart` ist weiterhin nur für den konfigurierten Bot-Owner zugänglich; eine Statistikabfrage löst keinen Neustart aus.
 # YouTube und Lyrics
@@ -429,7 +420,7 @@ Alle registrierten Commands sind zusätzlich als normale Nachrichten verfügbar.
 - `T.stats`, `T.queue`, `T.skip`, `T.pause`, `T.resume`
 - `T.prefix ?` oder `/prefix value:?` speichert einen neuen Prefix für diesen Server. `T.prefix` bzw. `/prefix` zeigt den aktuellen Wert. Zum Zurücksetzen `/prefix value:T.` verwenden.
 
-Prefixe dürfen 1–10 Buchstaben, Ziffern oder unterstützte Satzzeichen enthalten, z. B. `t!`. Änderungen erfordern **Server verwalten**. Die Tabelle `guild_prefixes` in der vorhandenen SQLite-Datenbank speichert sie dauerhaft. Nach einer Änderung gilt sofort nur noch der neue Prefix; Slash-Commands bleiben erreichbar.
+Prefixe dürfen 1–10 Buchstaben, Ziffern oder unterstützte Satzzeichen enthalten, z. B. `t!`. Änderungen erfordern **Server verwalten**. Die MongoDB-Collection `guild_prefixes` speichert sie dauerhaft. Nach einer Änderung gilt sofort nur noch der neue Prefix; Slash-Commands bleiben erreichbar.
 
 Argumente folgen der Reihenfolge der Slash-Optionen. Suchtexte, Gründe und Status-Texte dürfen Leerzeichen enthalten. Mit `--optionsname wert` lassen sich Optionen ausdrücklich setzen, z. B. `T.status start --texts Music | Volleyball --interval_ms 120000`. `T.timeout @Mitglied 5 Spam` verwendet dieselben Rechte- und Hierarchieprüfungen wie `/timeout`. `T.restart` bleibt auf den Bot-Owner beschränkt und startet erst nach erfolgreicher Antwort neu. Bots, Webhooks und DMs lösen keine Prefix-Commands aus.
 

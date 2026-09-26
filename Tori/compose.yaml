@@ -1,8 +1,24 @@
+name: tori-main
+
 services:
+  mongodb:
+    image: mongo:8.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27018:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: tori
+      MONGO_INITDB_ROOT_PASSWORD: ${TORI_MONGO_PASSWORD:?MongoDB-Passwort in .env setzen}
+      MONGO_INITDB_DATABASE: tori_main
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --username tori --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:latest
-    ports:
-      - "127.0.0.1:2333:2333"
     restart: unless-stopped
     environment:
       LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:?Passwort in .env setzen}
@@ -16,7 +32,10 @@ services:
     restart: unless-stopped
     stop_grace_period: 75s
     depends_on:
-      - lavalink
+      lavalink:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
     env_file: .env
     environment:
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
@@ -26,12 +45,9 @@ services:
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
       MODLOG_WEBHOOK_URL: ${MODLOG_WEBHOOK_URL:-}
       BOT_DEFAULT_LANGUAGE: ${BOT_DEFAULT_LANGUAGE:-de}
-      BOT_DATA_DIR: /app/data
-      MODLOG_DB_PATH: /app/data/moderation.db
+      MONGODB_URI: mongodb://tori:${TORI_MONGO_PASSWORD:?MongoDB-Passwort in .env setzen}@mongodb:27017/?authSource=admin
+      MONGODB_DATABASE: tori_main
       LAVALINK_URI: ws://lavalink:2333
       LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:?Passwort in .env setzen}
-    volumes:
-      - bot-data:/app/data
-
 volumes:
-  bot-data:
+  mongo-data:

@@ -8,10 +8,11 @@ import java.util.*;
 /** Single-process store. A failed write never changes the effective language. */
 public final class LanguageStore {
     private final Path file;
+    private final MongoBotStore mongo;
     private final Language defaultLanguage;
     private volatile Map<String, Language> languages = Map.of();
     public LanguageStore(Path file, Language defaultLanguage) throws IOException {
-        this.file = file.toAbsolutePath(); this.defaultLanguage = defaultLanguage;
+        this.file = file.toAbsolutePath(); this.defaultLanguage = defaultLanguage; this.mongo = null;
         var loaded = new HashMap<String, Language>();
         if (Files.exists(this.file)) {
             var props = new Properties();
@@ -27,12 +28,26 @@ public final class LanguageStore {
         return new LanguageStore(Path.of(config.get("BOT_DATA_DIR", "data"), "languages.properties"),
             Language.parse(config.get("BOT_DEFAULT_LANGUAGE", "de")));
     }
+    static LanguageStore fromMongo(BotConfig config, MongoBotStore mongo) throws IOException {
+        try { return new LanguageStore(mongo, Language.parse(config.get("BOT_DEFAULT_LANGUAGE", "de"))); }
+        catch (java.sql.SQLException ex) { throw new IOException("Cannot load guild languages from MongoDB."); }
+    }
+    private LanguageStore(MongoBotStore mongo, Language defaultLanguage) throws java.sql.SQLException {
+        this.file = null; this.mongo = mongo; this.defaultLanguage = defaultLanguage;
+        languages = Map.copyOf(mongo.languages());
+    }
     public Language defaultLanguage() { return defaultLanguage; }
     // Reads must not wait for a settings write on a gateway or REST callback thread.
     public Language get(String guildId) { return languages.getOrDefault(guildId, defaultLanguage); }
     public synchronized void set(String guildId, Language language) throws IOException {
         validateId(guildId); Objects.requireNonNull(language);
         var updated = new HashMap<>(languages); updated.put(guildId, language);
+        if (mongo != null) {
+            try { mongo.setLanguage(guildId, language); }
+            catch (java.sql.SQLException ex) { throw new IOException("Cannot save guild language to MongoDB."); }
+            languages = Map.copyOf(updated);
+            return;
+        }
         Files.createDirectories(file.getParent());
         Path temporary = Files.createTempFile(file.getParent(), "languages-", ".tmp");
         try {

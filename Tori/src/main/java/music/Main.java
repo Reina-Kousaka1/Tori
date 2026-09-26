@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class Main implements AutoCloseable {
     private final Instant startedAt;
     private final String sessionId = UUID.randomUUID().toString();
-    private final ModLogStore store;
+    private final BotStore store;
     private final CountDownLatch stopRequested = new CountDownLatch(1);
     private final CountDownLatch shutdownFinished = new CountDownLatch(1);
     private final AtomicBoolean closing = new AtomicBoolean();
@@ -30,7 +30,7 @@ public final class Main implements AutoCloseable {
     private WebhookModLogger modlog;
     private JDA jda;
 
-    Main(Instant startedAt, ModLogStore store) {
+    Main(Instant startedAt, BotStore store) {
         this.startedAt = startedAt;
         this.store = store;
     }
@@ -48,7 +48,7 @@ public final class Main implements AutoCloseable {
                     CommandRegistration.register(config.required("DISCORD_TOKEN"), config.get("DISCORD_GUILD_ID"));
                     return;
                 }
-                bot = new Main(Instant.now(), ModLogStore.fromConfig(config));
+                bot = new Main(Instant.now(), MongoBotStore.fromConfig(config));
                 Main running = bot;
                 shutdownHook = new Thread(running::close, "bot-shutdown");
                 Runtime.getRuntime().addShutdownHook(shutdownHook);
@@ -95,7 +95,8 @@ public final class Main implements AutoCloseable {
         long botId;
         try { botId = Long.parseLong(new String(Base64.getUrlDecoder().decode(token.split("\\.")[0]), StandardCharsets.UTF_8)); }
         catch (Exception ex) { throw new IllegalArgumentException("DISCORD_TOKEN has an invalid format."); }
-        LanguageStore languages = LanguageStore.fromConfig(config);
+        LanguageStore languages = store instanceof MongoBotStore mongo
+            ? LanguageStore.fromMongo(config, mongo) : LanguageStore.fromConfig(config);
         client = new LavalinkClient(botId);
         music = new MusicBot(client, languages, new YouTubeSearch(config.get("YOUTUBE_API_KEY")), YtDlp.fromConfig(config));
         modlog = WebhookModLogger.fromConfig(config, store);
@@ -166,6 +167,7 @@ public final class Main implements AutoCloseable {
                 }
             });
         } finally {
+            clean(store::close);
             shutdownFinished.countDown();
         }
     }

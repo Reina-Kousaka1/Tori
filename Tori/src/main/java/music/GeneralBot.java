@@ -28,12 +28,12 @@ public final class GeneralBot extends CommandListener {
     private Runnable shutdown;
     private final Instant startedAt;
     private final Clock clock;
-    private ModLogStore statsStore;
+    private BotStore statsStore;
     private String creator;
     private PrefixSettings prefixes;
     GeneralBot withPrefixes(PrefixSettings prefixes) { this.prefixes = prefixes; return this; }
     GeneralBot withShutdown(Runnable shutdown) { this.shutdown = Objects.requireNonNull(shutdown); return this; }
-    GeneralBot withStats(ModLogStore store, String creator) {
+    GeneralBot withStats(BotStore store, String creator) {
         this.statsStore = Objects.requireNonNull(store);
         this.creator = creator;
         return this;

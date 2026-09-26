@@ -4,17 +4,12 @@ import java.util.*;
 import java.sql.SQLException;
 
 final class PrefixSettings {
-    private final ModLogStore store;
+    private final BotStore store;
     private volatile Map<String, String> values;
-    PrefixSettings(ModLogStore store) throws SQLException {
+    PrefixSettings(BotStore store) throws SQLException {
         this.store = store;
         var loaded = new HashMap<String, String>();
-        try (var connection = store.connect(); var sql = connection.createStatement()) {
-            sql.execute("CREATE TABLE IF NOT EXISTS guild_prefixes (guild_id TEXT PRIMARY KEY, prefix TEXT NOT NULL)");
-            try (var rows = sql.executeQuery("SELECT guild_id, prefix FROM guild_prefixes")) {
-                while (rows.next()) loaded.put(rows.getString(1), validate(rows.getString(2)));
-            }
-        }
+        store.prefixes().forEach((guild, prefix) -> loaded.put(guild, validate(prefix)));
         values = Map.copyOf(loaded);
     }
     String get(String guild) { return values.getOrDefault(guild, "T."); }
@@ -24,10 +19,7 @@ final class PrefixSettings {
     }
     synchronized void set(String guild, String value) throws SQLException {
         validate(value);
-        try (var connection = store.connect(); var sql = connection.prepareStatement(
-            "INSERT INTO guild_prefixes VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET prefix=excluded.prefix")) {
-            sql.setString(1, guild); sql.setString(2, value); sql.executeUpdate();
-        }
+        store.setPrefix(guild, value);
         var updated = new HashMap<>(values); updated.put(guild, value); values = Map.copyOf(updated);
     }
 }
