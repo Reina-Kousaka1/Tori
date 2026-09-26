@@ -25,7 +25,7 @@ docker compose logs -f bot lavalink
 
 Nach einer Konfigurationsänderung erneut `docker compose up -d --build` ausführen.
 Beenden: `docker compose down`. `.env` wird nicht ins Docker-Image oder ZIP aufgenommen.
-Lavalink ist ausschließlich im internen Compose-Netz erreichbar.
+Lavalink ist im Compose-Netz intern erreichbar und vom Host ausschließlich über `127.0.0.1:2334` zugänglich.
 
 ## Discord-Berechtigungen
 
