@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Random;
 import java.util.Set;
 import java.util.random.RandomGenerator;
 
@@ -19,7 +20,11 @@ final class PostgresCurrencyStore implements CurrencyStore {
     private final PostgresDatabase database;
     private final RandomGenerator random;
 
-    PostgresCurrencyStore(PostgresDatabase database) { this(database, RandomGenerator.getDefault()); }
+    PostgresCurrencyStore(PostgresDatabase database) { this(database, defaultRandomGenerator()); }
+
+    /** Uses java.base directly instead of discovering an optional RandomGenerator provider. */
+    static RandomGenerator defaultRandomGenerator() { return new Random(); }
+
     PostgresCurrencyStore(PostgresDatabase database, RandomGenerator random) {
         this.database = Objects.requireNonNull(database);
         this.random = Objects.requireNonNull(random);
