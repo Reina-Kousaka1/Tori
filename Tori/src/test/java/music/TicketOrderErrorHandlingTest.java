@@ -4,6 +4,10 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TicketOrderErrorHandlingTest {
+    @Test void ticketCommandOutsideTicketChannelReturnsFriendlyMessageWithoutThrowing() {
+        assertEquals("This command must be used inside a ticket channel.", TicketOrderBot.ticketContextError(null));
+    }
+
     @Test void permissionFailureReturnsItsConcreteUserFacingMessage() {
         String permissionMessage="This action requires Manage Server, Administrator, or the configured order staff role.";
 

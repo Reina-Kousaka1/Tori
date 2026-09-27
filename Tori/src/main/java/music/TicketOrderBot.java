@@ -26,6 +26,7 @@ final class TicketOrderBot extends CommandListener {
     private static final String OPEN_BUTTON = "tori:ticket:open";
     private static final String ACTION_FAILED = "The action could not be completed. If this persists, contact a server administrator.";
     private static final String ORDER_PERMISSION_REQUIRED = "This action requires Manage Server, Administrator, or the configured order staff role.";
+    private static final String TICKET_CHANNEL_REQUIRED = "This command must be used inside a ticket channel.";
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("d MMMM uuuu").withLocale(Locale.US).withZone(ZoneOffset.UTC);
     private final TicketOrderStore store;
     TicketOrderBot(LanguageStore languages, TicketOrderStore store) {
@@ -220,7 +221,8 @@ final class TicketOrderBot extends CommandListener {
             case "open" -> { return "Ticket opened: <#"+openTicket(e.getGuild(),e.getUser().getId(),e.getOption("category")==null?"SUPPORT":e.getOption("category").getAsString()).getId()+">."; }
             case "claim" -> { return claimTicket(e); }
             case "details" -> {
-                var t=currentTicket(e); requireStaffOrOwner(e.getMember(),cfg.ticketStaffRoleId(),t.creatorId());
+                var t=currentTicket(e); String contextError=ticketContextError(t); if(contextError!=null)return contextError;
+                requireStaffOrOwner(e.getMember(),cfg.ticketStaffRoleId(),t.creatorId());
                 var out=new StringBuilder("Ticket #").append(t.id()).append(" · ").append(t.category()).append(" · ").append(t.status()).append("\nCreator: <@").append(t.creatorId()).append(">");
                 if(t.assignedStaffId()!=null)out.append("\nClaimed by: <@").append(t.assignedStaffId()).append(">");
                 if(t.orderId()!=null){var o=store.order(guild,t.orderId());out.append("\nLinked order: #").append(t.orderId());if(o!=null)out.append(" · ").append(o.status()).append(" · ").append(o.product());}
@@ -229,7 +231,8 @@ final class TicketOrderBot extends CommandListener {
             case "close" -> { return setTicketStatus(e,"CLOSED","OPEN"); }
             case "reopen" -> { return setTicketStatus(e,"OPEN","CLOSED"); }
             case "add", "remove" -> {
-                var t=currentTicket(e); requireStaffOrOwner(e.getMember(),cfg.ticketStaffRoleId(),t.creatorId()); String id=e.getOption("member").getAsUser().getId();
+                var t=currentTicket(e); String contextError=ticketContextError(t); if(contextError!=null)return contextError;
+                requireStaffOrOwner(e.getMember(),cfg.ticketStaffRoleId(),t.creatorId()); String id=e.getOption("member").getAsUser().getId();
                 var channel=e.getGuild().getTextChannelById(t.channelId()); if(channel==null)return "Ticket record saved; its channel no longer exists.";
                 Member member=e.getGuild().getMemberById(id); if(member==null)return "Member is not currently in this server.";
                 if(id.equals(t.creatorId())&&sub.equals("remove"))return "The ticket creator cannot be removed from their own ticket.";
@@ -239,7 +242,8 @@ final class TicketOrderBot extends CommandListener {
                 return sub.equals("add")?"Member added to ticket.":"Member removed from ticket.";
             }
             case "link_order" -> {
-                var t=currentTicket(e); requireStaffOrOwner(e.getMember(),cfg.ticketStaffRoleId(),t.creatorId()); long order=e.getOption("order_id").getAsLong();
+                var t=currentTicket(e); String contextError=ticketContextError(t); if(contextError!=null)return contextError;
+                requireStaffOrOwner(e.getMember(),cfg.ticketStaffRoleId(),t.creatorId()); long order=e.getOption("order_id").getAsLong();
                 var linkedOrder=store.order(guild,order); if(linkedOrder==null)return "Order not found on this server.";
                 if(t.orderId()!=null&&t.orderId()!=order)return "Ticket already has a different linked order.";
                 if(linkedOrder.ticketId()!=null&&linkedOrder.ticketId()!=t.id())return "Order already has a different linked ticket.";
@@ -257,7 +261,8 @@ final class TicketOrderBot extends CommandListener {
                     e.getHook().sendFiles(FileUpload.fromData(archived.getBytes(StandardCharsets.UTF_8),"ticket-"+id+"-transcript.txt")).setEphemeral(true).queue();
                     return "Archived transcript for ticket #"+id+" exported.";
                 }
-                var t=currentTicket(e); requireStaffOrOwner(e.getMember(),cfg.ticketStaffRoleId(),t.creatorId()); return transcript(e,t);
+                var t=currentTicket(e); String contextError=ticketContextError(t); if(contextError!=null)return contextError;
+                requireStaffOrOwner(e.getMember(),cfg.ticketStaffRoleId(),t.creatorId()); return transcript(e,t);
             }
             default -> { return "Unknown ticket action."; }
         }
@@ -382,10 +387,14 @@ final class TicketOrderBot extends CommandListener {
         if(shown<orders.size())out.append("… ").append(orders.size()-shown).append(" more active orders; use `/order view` with an ID.");return out.toString();
     }
     private TicketOrderStore.Ticket currentTicket(SlashCommandInteractionEvent e) throws Exception {
-        var t=store.ticketByChannel(e.getGuild().getId(),e.getChannel().getId()); if(t==null)throw new IllegalArgumentException("not ticket"); return t;
+        return store.ticketByChannel(e.getGuild().getId(),e.getChannel().getId());
+    }
+    static String ticketContextError(TicketOrderStore.Ticket ticket) {
+        return ticket==null?TICKET_CHANNEL_REQUIRED:null;
     }
     private String setTicketStatus(SlashCommandInteractionEvent e,String next,String expected) throws Exception {
-        var t=currentTicket(e); var cfg=store.config(t.guildId()); requireStaffOrOwner(e.getMember(),cfg.ticketStaffRoleId(),t.creatorId());
+        var t=currentTicket(e); String contextError=ticketContextError(t); if(contextError!=null)return contextError;
+        var cfg=store.config(t.guildId()); requireStaffOrOwner(e.getMember(),cfg.ticketStaffRoleId(),t.creatorId());
         return setTicketStatus(e.getGuild(),e.getChannel().getId(),t,next,expected,e.getUser().getId());
     }
     private String setTicketStatus(ButtonInteractionEvent e,String next,String expected) throws Exception {
@@ -410,7 +419,8 @@ final class TicketOrderBot extends CommandListener {
     }
     private Role ticketStaffRole(net.dv8tion.jda.api.entities.Guild guild,String guildId) throws Exception { String role=store.config(guildId).ticketStaffRoleId(); return role==null?null:guild.getRoleById(role); }
     private String claimTicket(SlashCommandInteractionEvent e) throws Exception {
-        var t=currentTicket(e); var cfg=store.config(t.guildId()); requireStaff(e.getMember(),cfg.ticketStaffRoleId());
+        var t=currentTicket(e); String contextError=ticketContextError(t); if(contextError!=null)return contextError;
+        var cfg=store.config(t.guildId()); requireStaff(e.getMember(),cfg.ticketStaffRoleId());
         return store.claimTicket(t.guildId(),t.id(),e.getUser().getId())?"Ticket #"+t.id()+" claimed.":"Ticket is already claimed or closed.";
     }
     private String claimTicket(ButtonInteractionEvent e) throws Exception {
