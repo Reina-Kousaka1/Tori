@@ -10,8 +10,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class CommandDefinitionsTest {
     @Test void allSlashCommandsSerializeWithValidOptions() {
         var commands = CommandRegistration.definitions();
-        assertEquals(30, commands.size());
-        assertEquals(30, commands.stream().map(c -> c.getName()).distinct().count());
+        assertEquals(47, commands.size());
+        assertEquals(47, commands.stream().map(c -> c.getName()).distinct().count());
         commands.forEach(command -> assertDoesNotThrow(() -> command.toData().toString(), command.getName()));
     }
     @Test void statusExposesRotationActionsAndBoundedMillisecondInterval() throws Exception {

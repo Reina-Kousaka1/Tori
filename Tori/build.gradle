@@ -10,6 +10,7 @@ repositories {
     maven { url = uri('https://maven.lavalink.dev/releases') }
 }
 dependencies {
+    implementation project(':database-api')
     implementation 'io.github.cdimascio:dotenv-java:3.2.0'
     implementation 'net.dv8tion:JDA:6.5.0'
     implementation 'dev.arbjerg:lavalink-client:3.4.0'

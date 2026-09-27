@@ -47,10 +47,14 @@ class LocalizationTest {
             for (var language : Language.values()) {
                 String code = language == Language.EN ? "en-US" : language.code;
                 assertEquals(Messages.text(language, "cmd." + command.getName()), json.path("description_localizations").path(code).asText());
-                for (var option : json.path("options"))
-                    assertEquals(Messages.text(language, "opt." + option.path("name").asText()), option.path("description_localizations").path(code).asText(), command.getName()+"/"+option.path("name").asText()+"/"+code);
+                for (var option : json.path("options")) {
+                    String name = option.path("name").asText();
+                    String key = command.getName().equals("market") && option.path("type").asInt() == 1
+                        ? "market.subcommand." + name : LocalizedCommands.optionKey(command.getName(), name);
+                    assertEquals(Messages.text(language, key), option.path("description_localizations").path(code).asText(), command.getName()+"/"+name+"/"+code);
+                }
                 for (var subcommand : json.path("options")) for (var nested : subcommand.path("options"))
-                    assertEquals(Messages.text(language,"opt."+nested.path("name").asText()),nested.path("description_localizations").path(code).asText(),command.getName()+"/"+subcommand.path("name").asText()+"/"+nested.path("name").asText()+"/"+code);
+                    assertEquals(Messages.text(language,LocalizedCommands.optionKey(command.getName(), nested.path("name").asText())),nested.path("description_localizations").path(code).asText(),command.getName()+"/"+subcommand.path("name").asText()+"/"+nested.path("name").asText()+"/"+code);
             }
         }
     }

@@ -326,9 +326,12 @@ starting at 0s and increasing normally; previous sessions' timestamps are not re
 After JDA is ready, slash commands are registered and the Lavalink node is configured, startup records `BOT_STARTED`.
 Playback and queues reset on process restart. Docker environment/code changes require rebuilding or recreating the container.
 
-The default 2-minutes rotation preserves Status 1: **Playing with my Besties 🎀 | N servers | N shards**, ONLINE.
-Status 2  ** at the training 🏐| (N)** with Discord status ONLINE. N in Status 2 is only the dynamic shard count.
-Owner `/status` overrides still work; `/status action:stop` restores the normal pair.
+The default two-minute rotation combines Tori's sweet-girly base with Balletcore and Volleyballcore
+across four rotating activities. Pick-me copy is limited to shop browsing and playful gathering replies;
+permissions, transactions, technical errors and moderation remain factual. Set
+`TORI_PERSONA_ENABLED=false` to disable added persona copy or `TORI_PICK_ME_INTENSITY=0..100`
+to tune its chance (default 72). These settings affect presentation only.
+Owner `/status` overrides still work; `/status action:stop` restores the default rotation.
 ## Snipe and public replies
 
 Server slash-command replies are public in the invoking channel. Command permissions still apply.
@@ -341,7 +344,7 @@ Bot/webhook messages are not cached. Restart clears the cache. Mentions in repli
 
 Ticket panels, private tickets, real customer orders, and the order queue are described in
 [docs/TICKETS-AND-ORDERS.md](docs/TICKETS-AND-ORDERS.md). They use separate PostgreSQL tables
-and do not read or modify economy/shop data.
+and do not read or modify player economy data.
 
 Moderation cases, guild prefixes, language settings, lifecycle statistics, tickets and orders are stored in Main Tori's PostgreSQL service. Configure a private password in `.env`:
 
@@ -350,6 +353,37 @@ TORI_POSTGRES_PASSWORD=REPLACE_WITH_LONG_RANDOM_PASSWORD
 ```
 
 Compose connects the bot to `postgres:5432` internally and stores database files in the `postgres-data` volume. PostgreSQL schema upgrades run automatically at bot startup using Flyway. The Mongo-to-PostgreSQL migration procedure is documented in [the migration guide](migration/mongodb/README.md); do not start the new bot against production until the source has been copied and checked.
+
+### Player economy and current shop
+
+The player economy is PostgreSQL-backed and isolated from ticket/order and moderation records. `/daily`
+grants the existing 150-credit allowance. `/shop`, `/iteminfo`, `/pricehistory`, `/buy`, `/sell`,
+`/inventory`, `/equip` and `/tools` cover the market and inventory; server managers can use `/market add`
+and `/market stock` for curated custom listings. `/fish`, `/mine` and `/chop` use the existing fishing,
+mining and woodcutting drops, tool tiers, durability and cooldown rules; `/craft`, `/repair` and
+`/opencrate` use the existing progression. Prices, rewards and transaction rules stay in `ShopCatalog`,
+`PostgresCurrencyStore` and `PostgresMarketStore`; persona text can decorate only the shop view and
+playful gather messages.
+
+The market and progression data were recovered from the existing test/development checkout used as
+the source for already-tested economy mechanics; those rules were ported into this Tori repository.
+Cheer, beauty and Sephora-era items are excluded. The shop keeps hourly bounded price movement,
+recorded price history, five-minute user/guild-bound quotes, finite or unlimited stock, timed discounts
+(an 8% chance every 30 minutes, with 5–30% off for 1–3 hours) and idempotent purchases in PostgreSQL.
+Active discounts are shown in `/shop`. V2 adds economy tables and indexes only: it does not drop
+or import MongoDB records, and it does not remove or alter any existing database volume. No MongoDB
+economy data is automatically imported; retain the old MongoDB volume until a separate, reviewed
+backup and migration have been completed.
+
+The PostgreSQL economy and market integration tests are opt-in. They run only when
+`TORI_POSTGRES_LIVE_TEST=YES` and `TORI_TEST_DATABASE_URL` names a dedicated database whose path is exactly
+`tori_test`; generated test accounts and products are cleaned up by their unique IDs. Otherwise Gradle skips them.
+
+The reusable database API is split into Gradle modules: `database-api` (shared contracts),
+`database-jdbc` (bounded async JDBC, HikariCP, prepared statements, transactions and Flyway),
+`database-postgresql`, `database-mysql`, and `database-ferretdb` (Mongo-compatible document operations,
+not SQL). These are opt-in libraries; the running bot still uses its existing PostgreSQL persistence
+and migration path. Providers do not replicate data between one another.
 
 The `moderation_cases` table stores the case and server IDs, action, channel, moderator, target, reason, result,
 time and language. It also tracks `webhook_status`, `webhook_attempts`, `webhook_http_status`,
