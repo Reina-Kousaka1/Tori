@@ -3,6 +3,7 @@ package music;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.Comparator;
 
 /** Pure guild queue and order-access rules shared by command handling and tests. */
 final class OrderPolicy {
@@ -17,7 +18,19 @@ final class OrderPolicy {
     }
     static boolean mayProcess(String mode,List<TicketOrderStore.Order> active,long orderId) {
         if("PARALLEL".equals(mode))return true;
-        return active.stream().noneMatch(order->order.id()!=orderId&&order.status().equals("PROCESSING"));
+        if(active.stream().anyMatch(order->order.id()!=orderId&&order.status().equals("PROCESSING")))return false;
+        TicketOrderStore.Order selected=active.stream().filter(order->order.id()==orderId).findFirst().orElse(null);
+        if(selected==null)return false;
+        if(selected.status().equals("PROCESSING"))return true;
+        TicketOrderStore.Order next=priorityOrder(active).stream().filter(order->order.status().equals("NOTED")).findFirst().orElse(null);
+        return next!=null&&next.id()==orderId;
+    }
+    static List<TicketOrderStore.Order> priorityOrder(List<TicketOrderStore.Order> orders) {
+        return orders.stream().sorted(Comparator
+            .comparingInt((TicketOrderStore.Order order)->order.status().equals("PROCESSING")?0:1)
+            .thenComparingInt(order->order.status().equals("PROCESSING")||order.fastpass()?0:1)
+            .thenComparing(TicketOrderStore.Order::createdAt)
+            .thenComparingLong(TicketOrderStore.Order::id)).toList();
     }
     static int position(long id,List<TicketOrderStore.Order> active) {
         for(int index=0;index<active.size();index++)if(active.get(index).id()==id)return index+1;

@@ -8,8 +8,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class OrderPolicyTest {
     private static TicketOrderStore.Order order(long id,String status) {
+        return order(id,status,false);
+    }
+    private static TicketOrderStore.Order order(long id,String status,boolean fastpass) {
         Instant now=Instant.parse("2026-09-25T12:00:00Z");
-        return new TicketOrderStore.Order(id,"guild","customer","design","details",null,status,now,now,null,"channel","message");
+        return new TicketOrderStore.Order(id,"guild","customer","design","details",null,status,now,now,null,"channel","message","PayPal",fastpass);
     }
     @Test void manageServerWithoutConfiguredStaffRoleIsAllowed() {
         assertTrue(OrderPolicy.mayManageOrders(true,false,null,Set.of()));
@@ -43,5 +46,18 @@ class OrderPolicyTest {
         assertFalse(OrderPolicy.validTransition("NOTED","NOTED"));
         assertTrue(OrderPolicy.validTransition("PROCESSING","DONE"));
         assertTrue(OrderPolicy.validTransition("NOTED","CANCELLED"));
+    }
+    @Test void fastpassOrdersMoveAheadOfWaitingOrdersWithoutPreemptingWork() {
+        var processing=order(1,"PROCESSING",false);
+        var normal=order(2,"NOTED",false);
+        var fastpass=order(3,"NOTED",true);
+        var laterFastpass=order(4,"NOTED",true);
+        var active=OrderPolicy.priorityOrder(List.of(normal,laterFastpass,fastpass,processing));
+        assertEquals(List.of(1L,3L,4L,2L),active.stream().map(TicketOrderStore.Order::id).toList());
+        assertFalse(OrderPolicy.mayProcess("SEQUENTIAL",active,2));
+        assertFalse(OrderPolicy.mayProcess("SEQUENTIAL",List.of(normal,laterFastpass,fastpass),2));
+        assertTrue(OrderPolicy.mayProcess("SEQUENTIAL",List.of(normal,laterFastpass,fastpass),3));
+        assertFalse(OrderPolicy.mayProcess("SEQUENTIAL",List.of(normal,laterFastpass,fastpass),4));
+        assertTrue(OrderPolicy.mayProcess("PARALLEL",active,2));
     }
 }
