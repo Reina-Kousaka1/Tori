@@ -24,6 +24,8 @@ import java.util.concurrent.TimeUnit;
 /** Guild isolated ticket and real-service order workflow. It does not access economy data. */
 final class TicketOrderBot extends CommandListener {
     private static final String OPEN_BUTTON = "tori:ticket:open";
+    private static final String ACTION_FAILED = "The action could not be completed. If this persists, contact a server administrator.";
+    private static final String ORDER_PERMISSION_REQUIRED = "This action requires Manage Server, Administrator, or the configured order staff role.";
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("d MMMM uuuu").withLocale(Locale.US).withZone(ZoneOffset.UTC);
     private final TicketOrderStore store;
     TicketOrderBot(LanguageStore languages, TicketOrderStore store) {
@@ -80,9 +82,10 @@ final class TicketOrderBot extends CommandListener {
         event.deferReply(true).queue(hook -> serial(event.getGuild().getIdLong(), () -> {
             String result;
             try { result = handleCommand(event); }
+            catch (IllegalArgumentException ex) { result = actionErrorMessage(ex); }
             catch (Exception ex) {
                 LoggerFactory.getLogger(TicketOrderBot.class).warn("Ticket/order command failed ({})", ex.getClass().getSimpleName());
-                result = "The action could not be completed. If this persists, contact a server administrator.";
+                result = actionErrorMessage(ex);
             }
             hook.editOriginal(result).setAllowedMentions(List.of()).queue(null,
                 failure -> LoggerFactory.getLogger(TicketOrderBot.class).warn("Ticket/order response failed ({})", failure.getClass().getSimpleName()));
@@ -120,12 +123,12 @@ final class TicketOrderBot extends CommandListener {
                 else response = "This control is no longer available.";
                 hook.editOriginal(response).setAllowedMentions(List.of()).queue();
             } catch (IllegalArgumentException ex) {
-                hook.editOriginal(ex.getMessage()).queue();
+                hook.editOriginal(actionErrorMessage(ex)).setAllowedMentions(List.of()).queue();
             } catch (Exception ex) {
                 if (ex instanceof ClassCastException)
                     LoggerFactory.getLogger(TicketOrderBot.class).warn("Ticket/order button failed with incompatible stored data.", ex);
                 else LoggerFactory.getLogger(TicketOrderBot.class).warn("Ticket/order button failed ({})", ex.getClass().getSimpleName());
-                hook.editOriginal("The action could not be completed.").queue();
+                hook.editOriginal(actionErrorMessage(ex)).setAllowedMentions(List.of()).queue();
             }
         }));
     }
@@ -136,6 +139,7 @@ final class TicketOrderBot extends CommandListener {
     }
     private String orderCommand(SlashCommandInteractionEvent e,String guild,String sub) throws Exception {
         var cfg=store.config(guild);
+        if (!"config".equals(sub)) requireOrderStaff(e.getMember(),cfg.staffRoleId());
         switch(sub) {
             case "config" -> {
                 requireAdmin(e.getMember()); boolean any=false;
@@ -145,7 +149,7 @@ final class TicketOrderBot extends CommandListener {
                 return any?"Order settings saved.":"Provide staff_role, channel, or queue_mode to change a setting.";
             }
             case "create" -> {
-                requireStaff(e.getMember(),cfg.staffRoleId()); var customer=e.getOption("customer").getAsUser();
+                var customer=e.getOption("customer").getAsUser();
                 String product=e.getOption("product").getAsString(), desc=e.getOption("description").getAsString();
                 String assigned=e.getOption("assigned_staff")==null?null:e.getOption("assigned_staff").getAsUser().getId();
                 var order=store.createOrder(guild,customer.getId(),product,desc,assigned);
@@ -160,22 +164,22 @@ final class TicketOrderBot extends CommandListener {
             }
             case "queue" -> { return queueText(store.orders(guild,true),cfg.queueMode()); }
             case "view" -> { var o=store.order(guild,e.getOption("id").getAsLong()); return o==null?"Order not found on this server.":orderText(o,store.orders(guild,true)); }
-            case "assign" -> { requireStaff(e.getMember(),cfg.staffRoleId()); long id=e.getOption("id").getAsLong(); String staff=e.getOption("staff").getAsUser().getId(); boolean saved=store.assign(guild,id,staff,e.getUser().getId()); if(saved)refreshOrder(e.getGuild(),store.order(guild,id),store.orders(guild,true)); return saved?"Order #"+id+" assigned to <@"+staff+">.":"Active order not found."; }
+            case "assign" -> { long id=e.getOption("id").getAsLong(); String staff=e.getOption("staff").getAsUser().getId(); boolean saved=store.assign(guild,id,staff,e.getUser().getId()); if(saved)refreshOrder(e.getGuild(),store.order(guild,id),store.orders(guild,true)); return saved?"Order #"+id+" assigned to <@"+staff+">.":"Active order not found."; }
             case "edit" -> {
-                requireStaff(e.getMember(),cfg.staffRoleId()); var old=store.order(guild,e.getOption("id").getAsLong()); if(old==null)return "Order not found on this server.";
+                var old=store.order(guild,e.getOption("id").getAsLong()); if(old==null)return "Order not found on this server.";
                 String product=e.getOption("product")==null?old.product():e.getOption("product").getAsString(); String desc=e.getOption("description")==null?old.description():e.getOption("description").getAsString();
                 if(e.getOption("product")==null&&e.getOption("description")==null)return "Provide product or description to edit.";
                 var updated=store.editOrder(guild,old.id(),product,desc); if(updated==null)return "Order is already done or cancelled.";
                 refreshOrder(e.getGuild(),updated,store.orders(guild,true)); return "Order #"+old.id()+" updated.";
             }
-            case "cancel" -> { requireStaff(e.getMember(),cfg.staffRoleId()); long id=e.getOption("id").getAsLong(); var o=store.order(guild,id); if(o==null)return "Order not found on this server."; return transition(e,o,"CANCELLED"); }
+            case "cancel" -> { long id=e.getOption("id").getAsLong(); var o=store.order(guild,id); if(o==null)return "Order not found on this server."; return transition(e,o,"CANCELLED"); }
             case "history" -> {
-                requireStaff(e.getMember(),cfg.staffRoleId()); long id=e.getOption("id").getAsLong(); if(store.order(guild,id)==null)return "Order not found on this server.";
+                long id=e.getOption("id").getAsLong(); if(store.order(guild,id)==null)return "Order not found on this server.";
                 var events=store.history(guild,id); if(events.isEmpty())return "Order #"+id+" has no status changes yet.";
                 var out=new StringBuilder("Status history for order #").append(id).append(':'); int start=Math.max(0,events.size()-20);
                 for(int i=start;i<events.size();i++){var x=events.get(i);out.append("\n").append(x.previousStatus()).append(" → ").append(x.newStatus()).append(" by <@").append(x.actorId()).append("> at ").append(x.occurredAt());} return out.toString();
             }
-            case "post" -> { requireStaff(e.getMember(),cfg.staffRoleId()); long id=e.getOption("id").getAsLong(); var o=store.order(guild,id); return o==null?"Order not found on this server.":repairOrderPost(e,o); }
+            case "post" -> { long id=e.getOption("id").getAsLong(); var o=store.order(guild,id); return o==null?"Order not found on this server.":repairOrderPost(e,o); }
             default -> { return "Unknown order action."; }
         }
     }
@@ -307,7 +311,7 @@ final class TicketOrderBot extends CommandListener {
     private String updateOrderButton(ButtonInteractionEvent e,String component) throws Exception {
         String[] parts=component.split(":"); if(parts.length!=4)return "Invalid order control.";
         long id=Long.parseLong(parts[2]); String status=parts[3]; if(!Set.of("NOTED","PROCESSING","DONE").contains(status))return "Invalid status.";
-        String guild=e.getGuild().getId(); var cfg=store.config(guild); requireStaff(e.getMember(),cfg.staffRoleId());
+        String guild=e.getGuild().getId(); var cfg=store.config(guild); requireOrderStaff(e.getMember(),cfg.staffRoleId());
         var order=store.order(guild,id); if(order==null)return "Order not found on this server.";
         if(!Objects.equals(order.postChannelId(),e.getChannel().getId())||!Objects.equals(order.postMessageId(),e.getMessageId()))return "This order post is no longer the active post.";
         if(order.status().equals(status))return "Order #"+id+" is already "+status+".";
@@ -427,6 +431,16 @@ final class TicketOrderBot extends CommandListener {
         return new TranscriptSnapshot(out.toString(),messages.size());
     }
     private static void requireAdmin(Member member) { if(member==null||!member.hasPermission(Permission.MANAGE_SERVER))throw new IllegalArgumentException("Server management permission required."); }
+    private static void requireOrderStaff(Member member,String roleId) {
+        Set<String> roleIds=member==null?Set.of():member.getRoles().stream().map(Role::getId).collect(java.util.stream.Collectors.toSet());
+        if(!OrderPolicy.mayManageOrders(member!=null&&member.hasPermission(Permission.MANAGE_SERVER),
+            member!=null&&member.hasPermission(Permission.ADMINISTRATOR),roleId,roleIds))
+            throw new IllegalArgumentException(ORDER_PERMISSION_REQUIRED);
+    }
+    static String actionErrorMessage(Exception failure) {
+        if(failure instanceof IllegalArgumentException&&failure.getMessage()!=null&&!failure.getMessage().isBlank()) return failure.getMessage();
+        return ACTION_FAILED;
+    }
     private static void requireStaff(Member member,String roleId) { if(member==null||(!member.hasPermission(Permission.ADMINISTRATOR)&& (roleId==null||member.getRoles().stream().noneMatch(r->r.getId().equals(roleId)))))throw new IllegalArgumentException("You need the configured staff role or administrator permission."); }
     private static void requireStaffOrOwner(Member member,String roleId,String creator) { if(member==null||(!member.hasPermission(Permission.ADMINISTRATOR)&&!member.getId().equals(creator)&&(roleId==null||member.getRoles().stream().noneMatch(r->r.getId().equals(roleId)))))throw new IllegalArgumentException("You do not have access to manage this ticket."); }
 }
