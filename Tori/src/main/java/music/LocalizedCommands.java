@@ -16,32 +16,32 @@ public final class LocalizedCommands {
                 for (var locale : locales(language)) {
                     slash.setDescriptionLocalization(locale, Messages.text(language, key));
                     for (var option : slash.getOptions())
-                        option.setDescriptionLocalization(locale, Messages.text(language, "opt." + option.getName()));
+                        option.setDescriptionLocalization(locale, Messages.text(language, optionKey(data.getName(), option.getName())));
                     for (var subcommand : slash.getSubcommands()) {
-                        subcommand.setDescriptionLocalization(locale, Messages.text(language, "opt." + subcommand.getName()));
+                        subcommand.setDescriptionLocalization(locale, Messages.text(language, subcommandKey(data.getName(), subcommand.getName())));
                         for (var option : subcommand.getOptions())
-                            option.setDescriptionLocalization(locale, Messages.text(language, "opt." + option.getName()));
+                            option.setDescriptionLocalization(locale, Messages.text(language, optionKey(data.getName(), option.getName())));
                     }
                     for (var group : slash.getSubcommandGroups()) {
-                        group.setDescriptionLocalization(locale, Messages.text(language, "opt." + group.getName()));
+                        group.setDescriptionLocalization(locale, Messages.text(language, subcommandKey(data.getName(), group.getName())));
                         for (var subcommand : group.getSubcommands()) {
-                            subcommand.setDescriptionLocalization(locale, Messages.text(language, "opt." + subcommand.getName()));
+                            subcommand.setDescriptionLocalization(locale, Messages.text(language, subcommandKey(data.getName(), subcommand.getName())));
                             for (var option : subcommand.getOptions())
-                                option.setDescriptionLocalization(locale, Messages.text(language, "opt." + option.getName()));
+                                option.setDescriptionLocalization(locale, Messages.text(language, optionKey(data.getName(), option.getName())));
                         }
                     }
                 }
             }
-            for (var option : slash.getOptions()) option.setDescription(Messages.text(Language.EN, "opt." + option.getName()));
+            for (var option : slash.getOptions()) option.setDescription(Messages.text(Language.EN, optionKey(data.getName(), option.getName())));
             for (var subcommand : slash.getSubcommands()) {
-                subcommand.setDescription(Messages.text(Language.EN, "opt." + subcommand.getName()));
-                for (var option : subcommand.getOptions()) option.setDescription(Messages.text(Language.EN, "opt." + option.getName()));
+                subcommand.setDescription(Messages.text(Language.EN, subcommandKey(data.getName(), subcommand.getName())));
+                for (var option : subcommand.getOptions()) option.setDescription(Messages.text(Language.EN, optionKey(data.getName(), option.getName())));
             }
             for (var group : slash.getSubcommandGroups()) {
-                group.setDescription(Messages.text(Language.EN, "opt." + group.getName()));
+                group.setDescription(Messages.text(Language.EN, subcommandKey(data.getName(), group.getName())));
                 for (var subcommand : group.getSubcommands()) {
-                    subcommand.setDescription(Messages.text(Language.EN, "opt." + subcommand.getName()));
-                    for (var option : subcommand.getOptions()) option.setDescription(Messages.text(Language.EN, "opt." + option.getName()));
+                    subcommand.setDescription(Messages.text(Language.EN, subcommandKey(data.getName(), subcommand.getName())));
+                    for (var option : subcommand.getOptions()) option.setDescription(Messages.text(Language.EN, optionKey(data.getName(), option.getName())));
                 }
             }
         }
@@ -53,5 +53,15 @@ public final class LocalizedCommands {
             case EN -> List.of(DiscordLocale.ENGLISH_US, DiscordLocale.ENGLISH_UK);
             case NL -> List.of(DiscordLocale.DUTCH);
         };
+    }
+
+    static String optionKey(String command, String option) {
+        if (command.equals("shop") && option.equals("category")) return "shop.option.category";
+        if (command.equals("market")) return "market.option." + option;
+        return "opt." + option;
+    }
+
+    private static String subcommandKey(String command, String subcommand) {
+        return command.equals("market") ? "market.subcommand." + subcommand : "opt." + subcommand;
     }
 }

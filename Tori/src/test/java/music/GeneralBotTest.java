@@ -82,20 +82,21 @@ class GeneralBotTest {
             bot.refreshDefaultStatus(jda);
             assertEquals(OnlineStatus.ONLINE, fixture.lastStatus.get());
             assertEquals(Activity.ActivityType.PLAYING, fixture.lastActivity.get().getType());
-            assertEquals("with my Besties! || 4 servers | 1 shards", fixture.lastActivity.get().getName());
+            assertEquals("with my Besties! | ballet + volleyball 🎀🏐 | 4 servers | 1 shards", fixture.lastActivity.get().getName());
             timer.advance(StatusRotation.DEFAULT_INTERVAL_MS - 1);
             assertEquals(OnlineStatus.ONLINE, fixture.lastStatus.get(), "Must not rotate before the interval");
             timer.advance(1);
             assertEquals(OnlineStatus.ONLINE, fixture.lastStatus.get());
             assertEquals(Activity.ActivityType.CUSTOM_STATUS, fixture.lastActivity.get().getType());
-            assertEquals("At the Volleyball Training🏐 | (1)", fixture.lastActivity.get().getName());
+            assertEquals("Ballet practice, then volleyball 🩰🏐 | (1)", fixture.lastActivity.get().getName());
             fixture.shardCount = 3;
             fixture.serverCount = 8;
             timer.advance(StatusRotation.DEFAULT_INTERVAL_MS);
             assertEquals(OnlineStatus.ONLINE, fixture.lastStatus.get());
-            assertEquals("with my Besties! || 8 servers | 3 shards", fixture.lastActivity.get().getName());
+            assertEquals(Activity.ActivityType.WATCHING, fixture.lastActivity.get().getType());
+            assertEquals("my pliés and volleyball serves 🎀 | (3)", fixture.lastActivity.get().getName());
             timer.advance(StatusRotation.DEFAULT_INTERVAL_MS);
-            assertEquals("At the Volleyball Training🏐 | (3)", fixture.lastActivity.get().getName());
+            assertEquals("my serve is cute, my landing is cleaner 🏐🩰 | (3)", fixture.lastActivity.get().getName());
             assertEquals(Messages.text(Language.EN, "status.default"), bot.handle(fixture.event("status", OWNER), Language.EN));
             var beforeClose = fixture.presenceUpdates.get();
             bot.close();
@@ -120,10 +121,10 @@ class GeneralBotTest {
             timer.advance(60_000);
             assertEquals("Owner text", fixture.lastActivity.get().getName());
             bot.handle(fixture.event("status", OWNER, Map.of("action", "stop")), Language.EN);
-            assertEquals("with my Besties! || 4 servers | 1 shards", fixture.lastActivity.get().getName());
+            assertEquals("with my Besties! | ballet + volleyball 🎀🏐 | 4 servers | 1 shards", fixture.lastActivity.get().getName());
             timer.advance(StatusRotation.DEFAULT_INTERVAL_MS);
             assertEquals(OnlineStatus.ONLINE, fixture.lastStatus.get());
-            assertEquals("At the Volleyball Training🏐 | (1)", fixture.lastActivity.get().getName());
+            assertEquals("Ballet practice, then volleyball 🩰🏐 | (1)", fixture.lastActivity.get().getName());
         }
     }
 

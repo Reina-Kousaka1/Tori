@@ -28,6 +28,7 @@ public final class Main implements AutoCloseable {
     private ModerationBot moderation;
     private GeneralBot general;
     private TicketOrderBot ticketOrders;
+    private PostgresMarketScheduler marketScheduler;
     private WebhookModLogger modlog;
     private JDA jda;
 
@@ -104,8 +105,15 @@ public final class Main implements AutoCloseable {
         moderation = new ModerationBot(modlog, languages);
         var prefixes = new PrefixSettings(store);
         general = new GeneralBot(languages, new StatusRotation(), ownerId, this::requestRestart, startedAt)
-            .withStats(store, config.get("BOT_CREATOR", "")).withPrefixes(prefixes).withShutdown(this::requestShutdown);
-        if (store instanceof PostgresBotStore postgres) ticketOrders = new TicketOrderBot(languages, new TicketOrderStore(postgres.database()));
+            .withStats(store, config.get("BOT_CREATOR", "")).withPrefixes(prefixes)
+            .withPersona(new ToriPersona(ToriPersonaConfig.load(config))).withShutdown(this::requestShutdown);
+        if (store instanceof PostgresBotStore postgres) {
+            general.withCurrency(new PostgresCurrencyStore(postgres.database()));
+            var market = new PostgresMarketStore(postgres.database());
+            marketScheduler = new PostgresMarketScheduler(market, Clock.systemUTC());
+            general.withMarket(market);
+            ticketOrders = new TicketOrderBot(languages, new TicketOrderStore(postgres.database()));
+        }
         var listeners = new java.util.ArrayList<Object>();
         listeners.addAll(java.util.List.of(music, moderation, moderation.snipes, general));
         if (ticketOrders != null) listeners.add(ticketOrders);
@@ -159,6 +167,7 @@ public final class Main implements AutoCloseable {
             return;
         }
         try {
+            if (marketScheduler != null) clean(marketScheduler::close);
             // Cancel the normal rotation without sending a shutdown/restart presence.
             if (general != null) clean(general::close);
             if (ticketOrders != null) clean(ticketOrders::close);

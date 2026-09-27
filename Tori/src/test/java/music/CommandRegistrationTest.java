@@ -17,7 +17,10 @@ class CommandRegistrationTest {
     private static final String APPLICATION = "123456789012345678";
     private static final String GUILD = "223456789012345678";
     private static final Set<String> NAMES = Set.of("repeat", "prefix", "play", "lyrics", "skip", "pause", "resume", "queue", "stop", "leave", "volume",
-        "kick", "ban", "unban", "timeout", "untimeout", "purge", "slowmode", "language", "help", "ping", "stats", "status", "restart", "shutdown", "uptime", "snipe", "avatar", "order", "ticket");
+        "kick", "ban", "unban", "timeout", "untimeout", "purge", "slowmode", "language", "help", "ping", "stats", "status", "restart", "shutdown", "uptime", "snipe", "avatar", "order", "ticket",
+        "balance", "daily", "shop", "buy", "sell", "inventory", "equip", "tools", "fish", "mine", "chop", "craft", "repair", "opencrate",
+        "market", "iteminfo", "pricehistory", "beg", "work", "loot", "transfer", "gamble", "slots",
+        "leaderboard", "grantcredits", "grantitem", "unequip");
 
     @Test void globalRegistrationPublishesCompleteCatalogAndConfirmsResponse() throws Exception {
         var transport = new RecordingTransport();
@@ -29,7 +32,7 @@ class CommandRegistrationTest {
         assertNull(transport.requests.getFirst().body());
         transport.requests.forEach(request -> assertEquals(TOKEN, request.token()));
         JsonNode payload = JSON.readTree(put.body());
-        assertEquals(30, payload.size());
+        assertEquals(57, payload.size());
         Set<String> names = new HashSet<>();
         for (var command : payload) {
             names.add(command.path("name").asText());
@@ -51,7 +54,7 @@ class CommandRegistrationTest {
         assertTrue(named(payload, "ping").path("default_member_permissions").isNull()
             || !named(payload, "ping").has("default_member_permissions"));
         assertTrue(status.path("default_member_permissions").isNull() || !status.has("default_member_permissions"));
-        assertTrue(output.contains("30 slash commands (global)"));
+        assertTrue(output.contains("57 slash commands (global)"));
         NAMES.forEach(name -> assertTrue(output.contains("/" + name)));
         assertFalse(output.contains(TOKEN));
     }

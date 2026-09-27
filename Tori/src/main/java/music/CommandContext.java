@@ -21,6 +21,7 @@ final class CommandContext {
         slash = null; this.message = message; this.name = name; this.options = options;
     }
     String getName() { return slash != null ? slash.getName() : name; }
+    String getSubcommandName() { return slash == null ? null : slash.getSubcommandName(); }
     Guild getGuild() { return slash != null ? slash.getGuild() : message.getGuild(); }
     User getUser() { return slash != null ? slash.getUser() : message.getAuthor(); }
     Member getMember() { return slash != null ? slash.getMember() : message.getMember(); }
