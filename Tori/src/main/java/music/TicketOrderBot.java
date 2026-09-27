@@ -310,7 +310,10 @@ final class TicketOrderBot extends CommandListener {
     }
     private String updateOrderButton(ButtonInteractionEvent e,String component) throws Exception {
         String[] parts=component.split(":"); if(parts.length!=4)return "Invalid order control.";
-        long id=Long.parseLong(parts[2]); String status=parts[3]; if(!Set.of("NOTED","PROCESSING","DONE").contains(status))return "Invalid status.";
+        long id;
+        try { id=Long.parseLong(parts[2]); }
+        catch(NumberFormatException ex) { return "Invalid order control."; }
+        String status=parts[3]; if(!Set.of("NOTED","PROCESSING","DONE").contains(status))return "Invalid status.";
         String guild=e.getGuild().getId(); var cfg=store.config(guild); requireOrderStaff(e.getMember(),cfg.staffRoleId());
         var order=store.order(guild,id); if(order==null)return "Order not found on this server.";
         if(!Objects.equals(order.postChannelId(),e.getChannel().getId())||!Objects.equals(order.postMessageId(),e.getMessageId()))return "This order post is no longer the active post.";
