@@ -5,6 +5,7 @@ import io.github.cdimascio.dotenv.DotenvException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.List;
 
 /** Local .env defaults with process environment overrides, loaded once at startup. */
 public final class BotConfig {
@@ -76,6 +77,17 @@ public final class BotConfig {
     }
     public String get(String name, String fallback) { return values.get(name, fallback); }
 
+    String redactSensitive(String text) {
+        String safe = text;
+        for (String key : List.of("DISCORD_TOKEN", "LAVALINK_PASSWORD", "TORI_DATABASE_PASSWORD",
+            "TORI_POSTGRES_PASSWORD", "SPOTIFY_CLIENT_SECRET", "YOUTUBE_API_KEY", "MODLOG_WEBHOOK_URL",
+            "TORI_DATABASE_URL", "LAVALINK_URI")) {
+            String value = get(key);
+            if (value != null && value.length() >= 4) safe = safe.replace(value, "[REDACTED:" + key + "]");
+        }
+        return safe;
+    }
+
     public String required(String name) {
         String value = get(name);
         if (value == null || value.isBlank()) {
@@ -84,3 +96,4 @@ public final class BotConfig {
         return value;
     }
 }
+

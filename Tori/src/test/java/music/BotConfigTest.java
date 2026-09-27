@@ -85,4 +85,19 @@ class BotConfigTest {
         assertNull(error.getCause());
         assertEquals(0, error.getSuppressed().length);
     }
+
+    @Test void startupDiagnosticIncludesFullCauseAndFramesButRedactsConfiguredSecrets() throws Exception {
+        String secret = "very-secret-token-value";
+        Files.writeString(directory.resolve(".env"), "DISCORD_TOKEN=" + secret + "\n");
+        var cause = new IllegalArgumentException("Invalid credential " + secret);
+        var failure = new IllegalStateException("Startup failed", cause);
+
+        String trace = Main.diagnosticStackTrace(failure, BotConfig.load(directory));
+
+        assertTrue(trace.contains("IllegalStateException: Startup failed"));
+        assertTrue(trace.contains("Caused by: java.lang.IllegalArgumentException: Invalid credential [REDACTED:DISCORD_TOKEN]"));
+        assertTrue(trace.contains("at music.BotConfigTest."));
+        assertFalse(trace.contains(secret));
+    }
 }
+

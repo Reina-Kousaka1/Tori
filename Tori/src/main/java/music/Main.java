@@ -5,7 +5,10 @@ import dev.arbjerg.lavalink.libraries.jda.JDAVoiceUpdateListener;
 import net.dv8tion.jda.api.*;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.cache.CacheFlag;
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
@@ -13,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class Main implements AutoCloseable {
+    private static final Logger LOG = LoggerFactory.getLogger(Main.class);
     private final Instant startedAt;
     private final String sessionId = UUID.randomUUID().toString();
     private final BotStore store;
@@ -41,10 +45,11 @@ public final class Main implements AutoCloseable {
         boolean again;
         do {
             Main bot = null;
+            BotConfig config = null;
             Thread shutdownHook = null;
             again = false;
             try {
-                BotConfig config = BotConfig.load();
+                config = BotConfig.load();
                 if (args.length == 1 && args[0].equals("--register-commands")) {
                     CommandRegistration.register(config.discordToken(), config.get("DISCORD_GUILD_ID"));
                     return;
@@ -58,11 +63,7 @@ public final class Main implements AutoCloseable {
                 again = "RESTART".equals(bot.stopReason)
                     && !Boolean.parseBoolean(config.get("BOT_RESTART_EXTERNAL", "false"));
             } catch (Exception ex) {
-                if (ex instanceof BotConfig.ConfigurationException configurationError)
-                    LoggerFactory.getLogger(Main.class).error("Bot startup configuration failed: {}", configurationError.getMessage());
-                else if (ex instanceof CommandRegistration.RegistrationException)
-                    LoggerFactory.getLogger(Main.class).error("{}", ex.getMessage());
-                else LoggerFactory.getLogger(Main.class).error("Bot startup or execution failed ({})", ex.getClass().getSimpleName());
+                logStartupFailure(ex, config);
                 result = 1;
             } finally {
                 if (bot != null) {
@@ -79,6 +80,27 @@ public final class Main implements AutoCloseable {
         } while (again);
         System.exit(result);
     }
+
+    private static void logStartupFailure(Exception ex, BotConfig config) {
+        if (ex instanceof BotConfig.ConfigurationException configurationError) {
+            LOG.error("Bot startup configuration failed: {}", configurationError.getMessage());
+        } else if (ex instanceof CommandRegistration.RegistrationException) {
+            LOG.error("{}", ex.getMessage());
+        } else if (ex instanceof IllegalArgumentException) {
+            LOG.error("Bot startup or execution failed (IllegalArgumentException); full sanitized stacktrace follows:\n{}",
+                diagnosticStackTrace(ex, config));
+        } else {
+            LOG.error("Bot startup or execution failed ({})", ex.getClass().getSimpleName());
+        }
+    }
+
+    static String diagnosticStackTrace(Throwable failure, BotConfig config) {
+        var trace = new StringWriter();
+        failure.printStackTrace(new PrintWriter(trace));
+        String rendered = trace.toString();
+        return config == null ? rendered : config.redactSensitive(rendered);
+    }
+
     private void run(BotConfig config) throws Exception {
         initialize(config);
         jda.awaitReady();
@@ -200,3 +222,4 @@ public final class Main implements AutoCloseable {
         }
     }
 }
+
