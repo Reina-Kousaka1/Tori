@@ -8,6 +8,24 @@ import static org.junit.jupiter.api.Assertions.*;
 class BotConfigTest {
     @TempDir Path directory;
 
+    @Test void rawDiscordTokenProvidesBotIdAndMalformedValueIsNotEchoed() {
+        assertEquals(123456789012345678L,
+            BotConfig.botIdFromToken("MTIzNDU2Nzg5MDEyMzQ1Njc4.timestamp.signature"));
+
+        String secret = "malformed-token-secret";
+        var error = assertThrows(BotConfig.ConfigurationException.class, () -> BotConfig.botIdFromToken(secret));
+        assertTrue(error.getMessage().contains("DISCORD_TOKEN"));
+        assertFalse(error.getMessage().contains(secret));
+    }
+
+    @Test void defaultLanguageValidationHasAnActionableSafeMessage() {
+        var error = assertThrows(BotConfig.ConfigurationException.class,
+            () -> BotConfig.validateDefaultLanguage("secret-language-value"));
+        assertTrue(error.getMessage().contains("BOT_DEFAULT_LANGUAGE"));
+        assertTrue(error.getMessage().contains("de, en, nl"));
+        assertFalse(error.getMessage().contains("secret-language-value"));
+    }
+
     @Test void ownerIdLoadsFromEnvAndBlankDisablesRestart() throws Exception {
         Files.writeString(directory.resolve(".env"), "BOT_OWNER_ID=123456789012345678\n");
         assertEquals(123456789012345678L, BotConfig.load(directory).ownerId());
