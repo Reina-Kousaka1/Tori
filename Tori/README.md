@@ -357,21 +357,25 @@ Compose connects the bot to `postgres:5432` internally and stores database files
 ### Player economy and current shop
 
 The player economy is PostgreSQL-backed and isolated from ticket/order and moderation records. `/daily`
-grants the existing 150-credit allowance. `/shop`, `/iteminfo`, `/pricehistory`, `/buy`, `/sell`,
+grants the existing 150-credit allowance; `/beg` and `/work` retain their one-minute reward cooldowns.
+`/loot` collects the existing small reward without a cooldown, matching the reference behavior; review
+whether that is acceptable before production. `/transfer`, `/gamble`, `/slots` and `/leaderboard`
+cover the existing player-credit actions. `/shop`, `/iteminfo`, `/pricehistory`, `/buy`, `/sell`,
 `/inventory`, `/equip` and `/tools` cover the market and inventory; server managers can use `/market add`
-and `/market stock` for curated custom listings. `/fish`, `/mine` and `/chop` use the existing fishing,
+and `/market stock` for curated custom listings. `/unequip` removes a tool from its slot. Bot-owner-only
+`/grantcredits` and `/grantitem` remain test utilities. `/fish`, `/mine` and `/chop` use the existing fishing,
 mining and woodcutting drops, tool tiers, durability and cooldown rules; `/craft`, `/repair` and
 `/opencrate` use the existing progression. Prices, rewards and transaction rules stay in `ShopCatalog`,
-`PostgresCurrencyStore` and `PostgresMarketStore`; persona text can decorate only the shop view and
-playful gather messages.
+`PostgresCurrencyStore` and `PostgresMarketStore`; persona text can decorate shop browsing and playful
+activity results, never balances, prices, cooldowns, permissions or transaction decisions.
 
 The market and progression data were recovered from the existing test/development checkout used as
 the source for already-tested economy mechanics; those rules were ported into this Tori repository.
 Cheer, beauty and Sephora-era items are excluded. The shop keeps hourly bounded price movement,
 recorded price history, five-minute user/guild-bound quotes, finite or unlimited stock, timed discounts
 (an 8% chance every 30 minutes, with 5–30% off for 1–3 hours) and idempotent purchases in PostgreSQL.
-Active discounts are shown in `/shop`. V2 adds economy tables and indexes only: it does not drop
-or import MongoDB records, and it does not remove or alter any existing database volume. No MongoDB
+Active discounts are shown in `/shop`. V2 and V3 add economy tables, indexes and cooldown columns only;
+they do not drop or import MongoDB records or remove or alter any existing database volume. No MongoDB
 economy data is automatically imported; retain the old MongoDB volume until a separate, reviewed
 backup and migration have been completed.
 

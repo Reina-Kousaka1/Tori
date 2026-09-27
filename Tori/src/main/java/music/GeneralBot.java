@@ -16,13 +16,17 @@ import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.interactions.commands.build.*;
 import java.io.IOException;
+import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadLocalRandom;
 
 public final class GeneralBot extends CommandListener {
+    private static final SecureRandom GAME_RANDOM = new SecureRandom();
+    private static final long MAX_DISCORD_INTEGER = 9_007_199_254_740_991L;
     private final StatusRotation rotation;
     private final long configuredOwnerId;
     private final Runnable restart;
@@ -60,8 +64,9 @@ public final class GeneralBot extends CommandListener {
     }
     GeneralBot(LanguageStore languages, StatusRotation rotation, long ownerId, Runnable restart, Instant startedAt, Clock clock) {
         super(Set.of("prefix", "language", "help", "ping", "stats", "status", "restart", "shutdown", "uptime", "avatar",
-            "balance", "daily", "shop", "buy", "sell", "inventory", "equip", "tools", "fish", "mine", "chop",
-            "craft", "repair", "opencrate", "market", "iteminfo", "pricehistory"), languages);
+            "balance", "daily", "beg", "work", "loot", "transfer", "gamble", "slots", "leaderboard",
+            "grantcredits", "grantitem", "shop", "buy", "sell", "inventory", "equip", "unequip", "tools",
+            "fish", "mine", "chop", "craft", "repair", "opencrate", "market", "iteminfo", "pricehistory"), languages);
         this.rotation = rotation;
         this.configuredOwnerId = ownerId;
         this.restart = restart;
@@ -111,8 +116,30 @@ public final class GeneralBot extends CommandListener {
             Commands.slash("prefix", "Show or change this server's command prefix")
                 .addOption(OptionType.STRING, "value", "New prefix", false),
             Commands.slash("stats", "Show uptime, servers, members and bot version"),
-            Commands.slash("balance", "Show your Tori credits"),
-            Commands.slash("daily", "Claim your daily credits"),
+            Commands.slash("balance", "Show your Tori credits")
+                .addOption(OptionType.USER, "user", "The user whose balance to show", false),
+            Commands.slash("daily", "Claim daily credits for yourself or another user")
+                .addOption(OptionType.USER, "user", "The user who receives the daily credits", false),
+            Commands.slash("beg", "Ask for a small credit handout"),
+            Commands.slash("work", "Take a quick job for credits")
+                .addOptions(new OptionData(OptionType.STRING, "job", "Choose an existing job (default: chop)", false)
+                    .addChoices(WorkCatalog.jobs().stream()
+                        .map(job -> new net.dv8tion.jda.api.interactions.commands.Command.Choice(job.name(), job.id()))
+                        .toList())),
+            Commands.slash("loot", "Collect a small amount of credits"),
+            Commands.slash("transfer", "Transfer credits to another user")
+                .addOption(OptionType.USER, "user", "The user receiving the credits", true)
+                .addOptions(new OptionData(OptionType.INTEGER, "amount", "Credits to transfer", true).setRequiredRange(1, MAX_DISCORD_INTEGER)),
+            Commands.slash("gamble", "Wager credits for a chance to win")
+                .addOptions(new OptionData(OptionType.INTEGER, "amount", "Credits to wager", true).setRequiredRange(1, MAX_DISCORD_INTEGER / 3)),
+            Commands.slash("slots", "Play slots with a credit wager")
+                .addOptions(new OptionData(OptionType.INTEGER, "amount", "Credits to wager", true).setRequiredRange(1, MAX_DISCORD_INTEGER / 3)),
+            Commands.slash("leaderboard", "Show the richest players"),
+            Commands.slash("grantcredits", "Add credits to your account (bot owner only)")
+                .addOptions(new OptionData(OptionType.INTEGER, "amount", "Credits to add", true).setRequiredRange(1, 1_000_000)),
+            Commands.slash("grantitem", "Add an item to your inventory (bot owner only)")
+                .addOption(OptionType.STRING, "item", "Existing Tori item ID", true)
+                .addOptions(new OptionData(OptionType.INTEGER, "quantity", "Quantity from 1 to 100", false).setRequiredRange(1, 100)),
             Commands.slash("shop", "Browse the current Tori market")
                 .addOption(OptionType.STRING, "category", "Market category (all, common, tools, collectibles, utility)", false),
             Commands.slash("iteminfo", "Inspect a market product")
@@ -140,9 +167,14 @@ public final class GeneralBot extends CommandListener {
             Commands.slash("sell", "Sell an item from your inventory")
                 .addOption(OptionType.STRING, "item", "Item ID", true)
                 .addOption(OptionType.INTEGER, "quantity", "Quantity (1–100)", false),
-            Commands.slash("inventory", "Show your collected items"),
+            Commands.slash("inventory", "Show collected items")
+                .addOption(OptionType.USER, "user", "The user's inventory", false),
             Commands.slash("equip", "Equip a fishing rod, pickaxe, axe, or wrench")
                 .addOption(OptionType.STRING, "item", "Tool item ID", true),
+            Commands.slash("unequip", "Unequip one tool slot")
+                .addOptions(new OptionData(OptionType.STRING, "slot", "The equipment slot", true)
+                    .addChoice("Rod", "rod").addChoice("Pickaxe", "pickaxe")
+                    .addChoice("Axe", "axe").addChoice("Wrench", "wrench")),
             Commands.slash("tools", "Show your equipped tools and durability"),
             Commands.slash("fish", "Fish with your equipped rod"),
             Commands.slash("mine", "Mine with your equipped pickaxe"),
@@ -164,7 +196,8 @@ public final class GeneralBot extends CommandListener {
         ));
     }
     @Override protected String handle(CommandContext event, Language language) {
-        if (Set.of("balance", "daily", "shop", "buy", "sell", "inventory", "equip", "tools", "fish", "mine", "chop",
+        if (Set.of("balance", "daily", "beg", "work", "loot", "transfer", "gamble", "slots", "leaderboard",
+            "grantcredits", "grantitem", "shop", "buy", "sell", "inventory", "equip", "unequip", "tools", "fish", "mine", "chop",
             "craft", "repair", "opencrate", "market", "iteminfo", "pricehistory").contains(event.getName())) return economy(event, language);
         if (event.getName().equals("prefix")) {
             require(prefixes != null, "prefix.unavailable");
@@ -219,12 +252,27 @@ public final class GeneralBot extends CommandListener {
         String userId = event.getUser().getId();
         try {
             return switch (event.getName()) {
-                case "balance" -> Messages.text(language, "balance.result", event.getUser().getEffectiveName(), currency.balance(userId));
-                case "daily" -> {
-                    long wait = currency.daily(userId, clock.millis());
-                    yield wait == 0 ? Messages.text(language, "economy.daily.claimed", 150, currency.balance(userId))
-                        : Messages.text(language, "economy.daily.cooldown", Math.max(1, (wait + 59_999) / 60_000));
+                case "balance" -> {
+                    var selected = event.getOption("user");
+                    var user = selected == null ? event.getUser() : selected.getAsUser();
+                    yield Messages.text(language, "balance.result", user.getEffectiveName(), currency.balance(user.getId()));
                 }
+                case "daily" -> {
+                    var selected = event.getOption("user");
+                    var user = selected == null ? event.getUser() : selected.getAsUser();
+                    long wait = currency.daily(user.getId(), clock.millis());
+                    String result = wait == 0 ? Messages.text(language, "economy.daily.claimed", 150, currency.balance(user.getId()))
+                        : Messages.text(language, "economy.daily.cooldown", Math.max(1, (wait + 59_999) / 60_000));
+                    yield persona.decorate(result, ToriPersona.Context.SOCIAL_FUN, language);
+                }
+                case "beg" -> begText(event, language, userId);
+                case "work" -> workText(event, language, userId);
+                case "loot" -> lootText(language, userId);
+                case "transfer" -> transferText(event, language, userId);
+                case "gamble", "slots" -> wagerText(event, language, userId);
+                case "leaderboard" -> leaderboardText(language);
+                case "grantcredits" -> grantCreditsText(event, language, userId);
+                case "grantitem" -> grantItemText(event, language, userId);
                 case "shop" -> shopText(event, language);
                 case "buy" -> buyText(event, language, userId);
                 case "sell" -> sellText(event, language, userId);
@@ -305,13 +353,15 @@ public final class GeneralBot extends CommandListener {
     }
 
     private String inventoryText(CommandContext event, Language language, String userId) throws CurrencyStoreException {
-        var items = currency.inventory(userId);
-        if (items.isEmpty()) return Messages.text(language, "inventory.empty", event.getUser().getEffectiveName());
+        var selected = event.getOption("user");
+        var owner = selected == null ? event.getUser() : selected.getAsUser();
+        var items = currency.inventory(owner.getId());
+        if (items.isEmpty()) return Messages.text(language, "inventory.empty", owner.getEffectiveName());
         String content = String.join(", ", items.stream().map(item -> {
             var catalog = ShopCatalog.find(item.id());
             return (catalog == null ? item.id() : catalog.name()) + " × " + item.quantity();
         }).toList());
-        return Messages.text(language, "inventory.result", event.getUser().getEffectiveName(), content);
+        return Messages.text(language, "inventory.result", owner.getEffectiveName(), content);
     }
 
     private String equipText(CommandContext event, Language language, String userId) throws CurrencyStoreException {
@@ -321,6 +371,92 @@ public final class GeneralBot extends CommandListener {
         require(item != null && item.tool(), "shop.item");
         require(currency.equip(userId, item.id()), "shop.equip.failed");
         return Messages.text(language, "shop.equip.done", item.name(), item.toolSlot());
+    }
+
+    private String unequipText(CommandContext event, Language language, String userId) throws CurrencyStoreException {
+        var option = event.getOption("slot");
+        require(option != null, "error.input");
+        String slot = option.getAsString();
+        require(currency.unequip(userId, slot), "shop.unequip.failed");
+        return Messages.text(language, "shop.unequip.done", slot);
+    }
+
+    private String begText(CommandContext event, Language language, String userId) throws CurrencyStoreException {
+        long amount = ThreadLocalRandom.current().nextLong(15, 41);
+        long remaining = currency.beg(userId, clock.millis(), amount);
+        String result = remaining > 0
+            ? Messages.text(language, "currency.beg.cooldown", Math.max(1, (remaining + 999) / 1000))
+            : Messages.text(language, "currency.beg.result", event.getUser().getAsMention(), amount);
+        return persona.decorate(result, ToriPersona.Context.SOCIAL_FUN, language);
+    }
+
+    private String workText(CommandContext event, Language language, String userId) throws CurrencyStoreException {
+        var selected = event.getOption("job");
+        String job = selected == null ? WorkCatalog.jobs().getFirst().id() : selected.getAsString();
+        var result = currency.work(userId, clock.millis(), job);
+        require(!result.jobId().isBlank(), "currency.work.job");
+        String response = result.remaining() > 0
+            ? Messages.text(language, "currency.work.cooldown", Math.max(1, (result.remaining() + 999) / 1000))
+            : Messages.text(language, "currency.work.result", event.getUser().getAsMention(), result.jobName(), result.amount());
+        return persona.decorate(response, ToriPersona.Context.SOCIAL_FUN, language);
+    }
+
+    private String lootText(Language language, String userId) throws CurrencyStoreException {
+        long amount = ThreadLocalRandom.current().nextLong(25, 76);
+        require(currency.changeBalance(userId, amount), "balance.unavailable");
+        return persona.decorate(Messages.text(language, "currency.loot.result", amount), ToriPersona.Context.SOCIAL_FUN, language);
+    }
+
+    private String transferText(CommandContext event, Language language, String userId) throws CurrencyStoreException {
+        var selected = event.getOption("user");
+        require(selected != null, "currency.transfer.user");
+        var recipient = selected.getAsUser();
+        var amount = event.getOption("amount");
+        require(amount != null && amount.getAsLong() > 0 && amount.getAsLong() <= MAX_DISCORD_INTEGER, "currency.amount");
+        require(currency.transfer(userId, recipient.getId(), amount.getAsLong()), "currency.transfer.failed");
+        return Messages.text(language, "currency.transfer.result", amount.getAsLong(), recipient.getAsMention());
+    }
+
+    private String wagerText(CommandContext event, Language language, String userId) throws CurrencyStoreException {
+        var option = event.getOption("amount");
+        require(option != null && option.getAsLong() > 0 && option.getAsLong() <= MAX_DISCORD_INTEGER / 3, "currency.amount");
+        long wager = option.getAsLong();
+        var game = event.getName().equals("slots") ? GamblingPolicy.Game.SLOTS : GamblingPolicy.Game.GAMBLE;
+        long grossWinnings = GamblingPolicy.grossWinnings(game, wager, GAME_RANDOM.nextInt(100));
+        require(currency.settleWager(userId, wager, grossWinnings), "currency.insufficient");
+        String result = Messages.text(language, grossWinnings > 0 ? "currency.game.win" : "currency.game.loss",
+            grossWinnings > 0 ? grossWinnings : wager);
+        return persona.decorate(result, ToriPersona.Context.SOCIAL_FUN, language);
+    }
+
+    private String leaderboardText(Language language) throws CurrencyStoreException {
+        var ranks = currency.leaderboard(10);
+        if (ranks.isEmpty()) return Messages.text(language, "leaderboard.empty");
+        var lines = new StringBuilder(Messages.text(language, "leaderboard.title"));
+        for (int index = 0; index < ranks.size(); index++)
+            lines.append("\n").append(index + 1).append(". <@").append(ranks.get(index).userId())
+                .append("> — ").append(ranks.get(index).balance()).append(" credits");
+        return lines.toString();
+    }
+
+    private String grantCreditsText(CommandContext event, Language language, String userId) throws CurrencyStoreException {
+        require(configuredOwnerId != 0, "owner.unconfigured");
+        require(event.getUser().getIdLong() == configuredOwnerId, "owner.only");
+        long amount = event.getOption("amount").getAsLong();
+        require(amount > 0 && amount <= 1_000_000, "currency.amount");
+        require(currency.changeBalance(userId, amount), "balance.unavailable");
+        return Messages.text(language, "owner.granted", amount, currency.balance(userId));
+    }
+
+    private String grantItemText(CommandContext event, Language language, String userId) throws CurrencyStoreException {
+        require(configuredOwnerId != 0, "owner.unconfigured");
+        require(event.getUser().getIdLong() == configuredOwnerId, "owner.only");
+        var item = ShopCatalog.find(event.getOption("item").getAsString());
+        int quantity = event.getOption("quantity") == null ? 1 : event.getOption("quantity").getAsInt();
+        require(item != null && quantity >= 1 && quantity <= 100, "grantitem.invalid");
+        var grant = currency.grantItem(userId, item.id(), quantity);
+        require(grant != null, "grantitem.invalid");
+        return Messages.text(language, "owner.item.granted", grant.quantity(), grant.item().name());
     }
 
     private String toolsText(Language language, String userId) throws CurrencyStoreException {

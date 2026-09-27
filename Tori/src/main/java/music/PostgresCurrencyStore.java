@@ -13,6 +13,7 @@ import java.util.random.RandomGenerator;
 /** PostgreSQL-backed shop/game state. Every balance + inventory mutation is transactional. */
 final class PostgresCurrencyStore implements CurrencyStore {
     private static final long DAILY_MS = 86_400_000L;
+    private static final long ACTIVITY_COOLDOWN_MS = 60_000L;
     private static final long GATHER_COOLDOWN_MS = 60_000L;
     private static final List<String> SLOTS = List.of("rod", "pickaxe", "axe", "wrench");
     private final PostgresDatabase database;
@@ -43,6 +44,37 @@ final class PostgresCurrencyStore implements CurrencyStore {
             if (last > 0 && remaining(now, last, DAILY_MS) > 0) return remaining(now, last, DAILY_MS);
             credit(connection, userId, 150);
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET last_daily_at=?, updated_at=? WHERE user_id=?")) {
+                sql.setLong(1, now); sql.setObject(2, Instant.now()); sql.setString(3, userId); sql.executeUpdate();
+            }
+            return 0L;
+        });
+    }
+
+    @Override public long beg(String userId, long now, long amount) throws CurrencyStoreException {
+        return awardOnCooldown(userId, now, amount, "last_beg_at");
+    }
+
+    @Override public WorkCatalog.Result work(String userId, long now, String jobId) throws CurrencyStoreException {
+        WorkCatalog.Job job = WorkCatalog.find(jobId);
+        if (job == null) return new WorkCatalog.Result("", "", 0, 0);
+        long amount = WorkCatalog.reward(job);
+        long remaining = awardOnCooldown(userId, now, amount, "last_work_at");
+        return new WorkCatalog.Result(job.id(), job.name(), remaining == 0 ? amount : 0, remaining);
+    }
+
+    private long awardOnCooldown(String userId, long now, long amount, String field) throws CurrencyStoreException {
+        validateUser(userId);
+        if (now < 0 || amount < 1) throw new IllegalArgumentException("Invalid activity reward");
+        if (!Set.of("last_beg_at", "last_work_at").contains(field)) throw new IllegalArgumentException("Invalid activity field");
+        return transaction(connection -> {
+            ensureAccount(connection, userId);
+            long balance = lockedBalance(connection, userId);
+            long last = lastAt(connection, userId, field);
+            long wait = last == 0 ? 0 : remaining(now, last, ACTIVITY_COOLDOWN_MS);
+            if (wait > 0) return wait;
+            Math.addExact(balance, amount);
+            credit(connection, userId, amount);
+            try (var sql = connection.prepareStatement("UPDATE economy_accounts SET " + field + "=?,updated_at=? WHERE user_id=?")) {
                 sql.setLong(1, now); sql.setObject(2, Instant.now()); sql.setString(3, userId); sql.executeUpdate();
             }
             return 0L;
@@ -122,6 +154,108 @@ final class PostgresCurrencyStore implements CurrencyStore {
                 sql.setString(1, userId); sql.setString(2, item.toolSlot()); sql.setString(3, item.id()); sql.executeUpdate();
             }
             return true;
+        });
+    }
+
+    @Override public boolean unequip(String userId, String slot) throws CurrencyStoreException {
+        if (!SLOTS.contains(slot)) return false;
+        validateUser(userId);
+        return transaction(connection -> {
+            ensureAccount(connection, userId);
+            try (var sql = connection.prepareStatement("DELETE FROM economy_equipment WHERE user_id=? AND slot=?")) {
+                sql.setString(1, userId); sql.setString(2, slot);
+                return sql.executeUpdate() == 1;
+            }
+        });
+    }
+
+    @Override public boolean transfer(String fromUserId, String toUserId, long amount) throws CurrencyStoreException {
+        if (fromUserId == null || toUserId == null || fromUserId.equals(toUserId) || amount < 1) return false;
+        validateUser(fromUserId); validateUser(toUserId);
+        return transaction(connection -> {
+            ensureAccount(connection, fromUserId); ensureAccount(connection, toUserId);
+            String first = fromUserId.compareTo(toUserId) < 0 ? fromUserId : toUserId;
+            String second = fromUserId.equals(first) ? toUserId : fromUserId;
+            long firstBalance = lockedBalance(connection, first);
+            long secondBalance = lockedBalance(connection, second);
+            long fromBalance = fromUserId.equals(first) ? firstBalance : secondBalance;
+            long toBalance = toUserId.equals(first) ? firstBalance : secondBalance;
+            if (fromBalance < amount) return false;
+            final long nextTo;
+            try { nextTo = Math.addExact(toBalance, amount); }
+            catch (ArithmeticException ex) { return false; }
+            try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=?,updated_at=? WHERE user_id=?")) {
+                sql.setLong(1, fromBalance - amount); sql.setObject(2, Instant.now()); sql.setString(3, fromUserId);
+                if (sql.executeUpdate() != 1) return false;
+            }
+            try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=?,updated_at=? WHERE user_id=?")) {
+                sql.setLong(1, nextTo); sql.setObject(2, Instant.now()); sql.setString(3, toUserId);
+                if (sql.executeUpdate() != 1) throw new SQLException("Transfer recipient disappeared");
+            }
+            return true;
+        });
+    }
+
+    @Override public boolean changeBalance(String userId, long delta) throws CurrencyStoreException {
+        validateUser(userId);
+        if (delta == 0) return true;
+        return transaction(connection -> {
+            ensureAccount(connection, userId);
+            long balance = lockedBalance(connection, userId);
+            final long updated;
+            try { updated = Math.addExact(balance, delta); }
+            catch (ArithmeticException ex) { return false; }
+            if (updated < 0) return false;
+            try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=?,updated_at=? WHERE user_id=?")) {
+                sql.setLong(1, updated); sql.setObject(2, Instant.now()); sql.setString(3, userId);
+                return sql.executeUpdate() == 1;
+            }
+        });
+    }
+
+    /** Debits the wager and credits the gross return atomically; the caller supplies only a policy result. */
+    @Override public boolean settleWager(String userId, long wager, long grossWinnings) throws CurrencyStoreException {
+        validateUser(userId);
+        if (wager < 1 || grossWinnings < 0) return false;
+        long maximum = wager > Long.MAX_VALUE / 3 ? Long.MAX_VALUE : wager * 3;
+        if (grossWinnings > maximum) return false;
+        return transaction(connection -> {
+            ensureAccount(connection, userId);
+            long balance = lockedBalance(connection, userId);
+            if (balance < wager) return false;
+            final long after;
+            try { after = Math.addExact(balance - wager, grossWinnings); }
+            catch (ArithmeticException ex) { return false; }
+            try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=?,updated_at=? WHERE user_id=? AND balance>=?")) {
+                sql.setLong(1, after); sql.setObject(2, Instant.now()); sql.setString(3, userId); sql.setLong(4, wager);
+                return sql.executeUpdate() == 1;
+            }
+        });
+    }
+
+    @Override public Grant grantItem(String userId, String itemId, int quantity) throws CurrencyStoreException {
+        ShopCatalog.Item item = ShopCatalog.find(itemId);
+        if (item == null || quantity < 1 || quantity > 100) return null;
+        validateUser(userId);
+        transaction(connection -> {
+            ensureAccount(connection, userId);
+            addItem(connection, userId, item.id(), quantity);
+            return null;
+        });
+        return new Grant(item, quantity);
+    }
+
+    @Override public List<Rank> leaderboard(int limit) throws CurrencyStoreException {
+        int count = Math.clamp(limit, 1, 20);
+        return transaction(connection -> {
+            var result = new ArrayList<Rank>();
+            try (var sql = connection.prepareStatement("SELECT user_id,balance FROM economy_accounts ORDER BY balance DESC,user_id LIMIT ?")) {
+                sql.setInt(1, count);
+                try (var rows = sql.executeQuery()) {
+                    while (rows.next()) result.add(new Rank(rows.getString(1), rows.getLong(2)));
+                }
+            }
+            return List.copyOf(result);
         });
     }
 
@@ -273,7 +407,7 @@ final class PostgresCurrencyStore implements CurrencyStore {
     }
 
     private static long lastAt(Connection connection, String userId, String field) throws SQLException {
-        if (!Set.of("last_daily_at", "last_fish_at", "last_mine_at", "last_chop_at").contains(field)) throw new IllegalArgumentException();
+        if (!Set.of("last_daily_at", "last_fish_at", "last_mine_at", "last_chop_at", "last_beg_at", "last_work_at").contains(field)) throw new IllegalArgumentException();
         try (var sql = connection.prepareStatement("SELECT " + field + " FROM economy_accounts WHERE user_id=?")) {
             sql.setString(1, userId); try (var rows = sql.executeQuery()) { rows.next(); return rows.getLong(1); }
         }
