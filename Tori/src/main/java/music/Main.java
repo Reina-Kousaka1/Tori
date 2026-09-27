@@ -86,12 +86,14 @@ public final class Main implements AutoCloseable {
             LOG.error("Bot startup configuration failed: {}", configurationError.getMessage());
         } else if (ex instanceof CommandRegistration.RegistrationException) {
             LOG.error("{}", ex.getMessage());
-        } else if (ex instanceof IllegalArgumentException) {
-            LOG.error("Bot startup or execution failed (IllegalArgumentException); full sanitized stacktrace follows:\n{}",
-                diagnosticStackTrace(ex, config));
         } else {
-            LOG.error("Bot startup or execution failed ({})", ex.getClass().getSimpleName());
+            LOG.error("{}", unexpectedStartupDiagnostic(ex, config));
         }
+    }
+
+    static String unexpectedStartupDiagnostic(Exception failure, BotConfig config) {
+        return "Bot startup or execution failed (" + failure.getClass().getSimpleName()
+            + "); full sanitized stacktrace follows:\n" + diagnosticStackTrace(failure, config);
     }
 
     static String diagnosticStackTrace(Throwable failure, BotConfig config) {
@@ -222,4 +224,3 @@ public final class Main implements AutoCloseable {
         }
     }
 }
-

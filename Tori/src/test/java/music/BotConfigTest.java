@@ -99,5 +99,25 @@ class BotConfigTest {
         assertTrue(trace.contains("at music.BotConfigTest."));
         assertFalse(trace.contains(secret));
     }
-}
 
+    @Test void unexpectedCurrencyStoreFailureLogsSanitizedMessageAndFullCauseChain() throws Exception {
+        String password = "test-only-postgres-password";
+        String token = "test-only-discord-token";
+        Files.writeString(directory.resolve(".env"), "TORI_DATABASE_PASSWORD=" + password
+            + "\nDISCORD_TOKEN=" + token + "\n");
+        var root = new java.sql.SQLException("Connection rejected " + password);
+        var intermediate = new IllegalStateException("Market seed failed " + token, root);
+        var failure = new CurrencyStoreException(intermediate);
+
+        String diagnostic = Main.unexpectedStartupDiagnostic(failure, BotConfig.load(directory));
+
+        assertTrue(diagnostic.contains("Bot startup or execution failed (CurrencyStoreException)"));
+        assertTrue(diagnostic.contains("music.CurrencyStoreException: Economy storage operation failed."));
+        assertTrue(diagnostic.contains("Caused by: java.lang.IllegalStateException: Market seed failed [REDACTED:DISCORD_TOKEN]"));
+        assertTrue(diagnostic.contains("Caused by: java.sql.SQLException: Connection rejected [REDACTED:TORI_DATABASE_PASSWORD]"));
+        assertTrue(diagnostic.contains("at music.BotConfigTest."));
+        assertFalse(diagnostic.contains(password));
+        assertFalse(diagnostic.contains(token));
+        assertEquals("Economy storage operation failed.", failure.getMessage());
+    }
+}

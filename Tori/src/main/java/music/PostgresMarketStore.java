@@ -407,12 +407,12 @@ final class PostgresMarketStore {
                 throw abort;
             } catch (Exception ex) {
                 try { connection.rollback(); } catch (SQLException ignored) { }
-                throw new CurrencyStoreException();
+                throw new CurrencyStoreException(ex);
             } finally {
                 try { connection.setAutoCommit(autoCommit); } catch (SQLException ignored) { }
             }
         } catch (PurchaseAbort abort) { throw abort; }
-        catch (SQLException ex) { throw new CurrencyStoreException(); }
+        catch (SQLException ex) { throw new CurrencyStoreException(ex); }
     }
 
     private DeseModels.Purchase priorPurchase(String interactionId) throws CurrencyStoreException {
