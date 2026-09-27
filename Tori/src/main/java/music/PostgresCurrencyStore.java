@@ -49,7 +49,8 @@ final class PostgresCurrencyStore implements CurrencyStore {
             if (last > 0 && remaining(now, last, DAILY_MS) > 0) return remaining(now, last, DAILY_MS);
             credit(connection, userId, 150);
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET last_daily_at=?, updated_at=? WHERE user_id=?")) {
-                sql.setLong(1, now); sql.setObject(2, Instant.now()); sql.setString(3, userId); sql.executeUpdate();
+                sql.setLong(1, now); PostgresTimestamps.bind(sql, 2, Instant.now());
+                sql.setString(3, userId); sql.executeUpdate();
             }
             return 0L;
         });
@@ -80,7 +81,8 @@ final class PostgresCurrencyStore implements CurrencyStore {
             Math.addExact(balance, amount);
             credit(connection, userId, amount);
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET " + field + "=?,updated_at=? WHERE user_id=?")) {
-                sql.setLong(1, now); sql.setObject(2, Instant.now()); sql.setString(3, userId); sql.executeUpdate();
+                sql.setLong(1, now); PostgresTimestamps.bind(sql, 2, Instant.now());
+                sql.setString(3, userId); sql.executeUpdate();
             }
             return 0L;
         });
@@ -115,7 +117,8 @@ final class PostgresCurrencyStore implements CurrencyStore {
             long current = lockedBalance(connection, userId);
             if (current < total) return null;
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=balance-?, updated_at=? WHERE user_id=? AND balance>=?")) {
-                sql.setLong(1, total); sql.setObject(2, Instant.now()); sql.setString(3, userId); sql.setLong(4, total);
+                sql.setLong(1, total); PostgresTimestamps.bind(sql, 2, Instant.now());
+                sql.setString(3, userId); sql.setLong(4, total);
                 if (sql.executeUpdate() != 1) return null;
             }
             addItem(connection, userId, item.id(), quantity);
@@ -138,7 +141,8 @@ final class PostgresCurrencyStore implements CurrencyStore {
             removeItem(connection, userId, item.id(), quantity);
             long next = Math.addExact(current, total);
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=?, updated_at=? WHERE user_id=?")) {
-                sql.setLong(1, next); sql.setObject(2, Instant.now()); sql.setString(3, userId); sql.executeUpdate();
+                sql.setLong(1, next); PostgresTimestamps.bind(sql, 2, Instant.now());
+                sql.setString(3, userId); sql.executeUpdate();
             }
             return new Sale(item, quantity, total, next);
         });
@@ -190,11 +194,13 @@ final class PostgresCurrencyStore implements CurrencyStore {
             try { nextTo = Math.addExact(toBalance, amount); }
             catch (ArithmeticException ex) { return false; }
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=?,updated_at=? WHERE user_id=?")) {
-                sql.setLong(1, fromBalance - amount); sql.setObject(2, Instant.now()); sql.setString(3, fromUserId);
+                sql.setLong(1, fromBalance - amount); PostgresTimestamps.bind(sql, 2, Instant.now());
+                sql.setString(3, fromUserId);
                 if (sql.executeUpdate() != 1) return false;
             }
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=?,updated_at=? WHERE user_id=?")) {
-                sql.setLong(1, nextTo); sql.setObject(2, Instant.now()); sql.setString(3, toUserId);
+                sql.setLong(1, nextTo); PostgresTimestamps.bind(sql, 2, Instant.now());
+                sql.setString(3, toUserId);
                 if (sql.executeUpdate() != 1) throw new SQLException("Transfer recipient disappeared");
             }
             return true;
@@ -212,7 +218,8 @@ final class PostgresCurrencyStore implements CurrencyStore {
             catch (ArithmeticException ex) { return false; }
             if (updated < 0) return false;
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=?,updated_at=? WHERE user_id=?")) {
-                sql.setLong(1, updated); sql.setObject(2, Instant.now()); sql.setString(3, userId);
+                sql.setLong(1, updated); PostgresTimestamps.bind(sql, 2, Instant.now());
+                sql.setString(3, userId);
                 return sql.executeUpdate() == 1;
             }
         });
@@ -232,7 +239,8 @@ final class PostgresCurrencyStore implements CurrencyStore {
             try { after = Math.addExact(balance - wager, grossWinnings); }
             catch (ArithmeticException ex) { return false; }
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=?,updated_at=? WHERE user_id=? AND balance>=?")) {
-                sql.setLong(1, after); sql.setObject(2, Instant.now()); sql.setString(3, userId); sql.setLong(4, wager);
+                sql.setLong(1, after); PostgresTimestamps.bind(sql, 2, Instant.now());
+                sql.setString(3, userId); sql.setLong(4, wager);
                 return sql.executeUpdate() == 1;
             }
         });
@@ -307,7 +315,8 @@ final class PostgresCurrencyStore implements CurrencyStore {
             addItem(connection, userId, drop, 1);
             setWear(connection, userId, itemId, used + 1);
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET last_" + activity + "_at=?, updated_at=? WHERE user_id=?")) {
-                sql.setLong(1, now); sql.setObject(2, Instant.now()); sql.setString(3, userId); sql.executeUpdate();
+                sql.setLong(1, now); PostgresTimestamps.bind(sql, 2, Instant.now());
+                sql.setString(3, userId); sql.executeUpdate();
             }
             boolean broke = used + 1 >= tool.durability();
             if (broke) try (var sql = connection.prepareStatement("DELETE FROM economy_equipment WHERE user_id=? AND slot=? AND item_id=?")) {
@@ -349,7 +358,8 @@ final class PostgresCurrencyStore implements CurrencyStore {
             if (quantity(connection, userId, item.id()) < 1 || equippedItem(connection, userId, "wrench") == null
                 || wear(connection, userId, item.id()) < 1 || balance < cost) return false;
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=balance-?,updated_at=? WHERE user_id=? AND balance>=?")) {
-                sql.setLong(1, cost); sql.setObject(2, Instant.now()); sql.setString(3, userId); sql.setLong(4, cost);
+                sql.setLong(1, cost); PostgresTimestamps.bind(sql, 2, Instant.now());
+                sql.setString(3, userId); sql.setLong(4, cost);
                 if (sql.executeUpdate() != 1) return false;
             }
             setWear(connection, userId, item.id(), 0);
@@ -483,7 +493,8 @@ final class PostgresCurrencyStore implements CurrencyStore {
 
     private static void credit(Connection connection, String userId, long amount) throws SQLException {
         try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=balance+?,updated_at=? WHERE user_id=?")) {
-            sql.setLong(1, amount); sql.setObject(2, Instant.now()); sql.setString(3, userId); sql.executeUpdate();
+            sql.setLong(1, amount); PostgresTimestamps.bind(sql, 2, Instant.now());
+            sql.setString(3, userId); sql.executeUpdate();
         }
     }
 
