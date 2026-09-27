@@ -48,6 +48,11 @@ class CommandDefinitionsTest {
         assertEquals(Set.of("customer","product","description"),required);
         Set<String> allCreateOptions=new HashSet<>();
         for(var option:create.path("options"))allCreateOptions.add(option.path("name").asText());
-        assertEquals(Set.of("customer","product","description","assigned_staff"),allCreateOptions);
+        assertEquals(Set.of("customer","product","description","assigned_staff","payment_method","fastpass"),allCreateOptions);
+        var createOptions=new HashMap<String,JsonNode>();
+        create.path("options").forEach(option->createOptions.put(option.path("name").asText(),option));
+        assertFalse(createOptions.get("payment_method").path("required").asBoolean());
+        assertFalse(createOptions.get("fastpass").path("required").asBoolean());
+        assertEquals(60,createOptions.get("payment_method").path("max_length").asInt());
     }
 }

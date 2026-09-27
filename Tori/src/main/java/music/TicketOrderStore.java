@@ -10,7 +10,14 @@ import java.util.*;
 final class TicketOrderStore {
     record Order(long id, String guildId, String customerId, String product, String description,
                  String assignedStaffId, String status, Instant createdAt, Instant updatedAt,
-                 Long ticketId, String postChannelId, String postMessageId) {}
+                 Long ticketId, String postChannelId, String postMessageId, String paymentMethod, boolean fastpass) {
+        Order(long id, String guildId, String customerId, String product, String description,
+              String assignedStaffId, String status, Instant createdAt, Instant updatedAt,
+              Long ticketId, String postChannelId, String postMessageId) {
+            this(id, guildId, customerId, product, description, assignedStaffId, status, createdAt, updatedAt,
+                ticketId, postChannelId, postMessageId, "", false);
+        }
+    }
     record Ticket(long id, String guildId, String creatorId, String category, String channelId,
                   String status, String assignedStaffId, Instant createdAt, Instant closedAt, Long orderId) {}
     record Config(String guildId, String staffRoleId, String orderChannelId, String ticketCategoryId,
@@ -38,7 +45,7 @@ final class TicketOrderStore {
         return new Order(r.getLong("order_id"), r.getString("guild_id"), r.getString("customer_id"),
             r.getString("product"), r.getString("description"), r.getString("assigned_staff_id"),
             r.getString("status"), instant(r,"created_at"), instant(r,"updated_at"), nullableLong(r,"ticket_id"),
-            r.getString("post_channel_id"), r.getString("post_message_id"));
+            r.getString("post_channel_id"), r.getString("post_message_id"), r.getString("payment_method"), r.getBoolean("fastpass"));
     }
     private static Ticket ticket(ResultSet r) throws SQLException {
         return new Ticket(r.getLong("ticket_id"), r.getString("guild_id"), r.getString("creator_id"),
@@ -105,17 +112,19 @@ final class TicketOrderStore {
             """)){p.setString(1,guild);p.executeUpdate();} catch(SQLException ex){throw failed(ex);}
     }
 
-    Order createOrder(String guild,String customer,String product,String description,String staff) throws SQLException {
+    Order createOrder(String guild,String customer,String product,String description,String staff,
+                      String paymentMethod,boolean fastpass) throws SQLException {
         Instant now=Instant.now();
+        String method=PaymentMethodPolicy.normalize(paymentMethod);
         try(var c=database.connection()) {
             c.setAutoCommit(false);
             try {
                 long id=next(c,guild,"order");
                 try(var p=c.prepareStatement("""
-                    INSERT INTO guild_orders(guild_id,order_id,customer_id,product,description,assigned_staff_id,status,created_at,updated_at)
-                    VALUES (?,?,?,?,?,?,'NOTED',?,?)
+                    INSERT INTO guild_orders(guild_id,order_id,customer_id,product,description,assigned_staff_id,status,created_at,updated_at,payment_method,fastpass)
+                    VALUES (?,?,?,?,?,?,'NOTED',?,?,?,?)
                     """)) {p.setString(1,guild);p.setLong(2,id);p.setString(3,customer);p.setString(4,product);p.setString(5,description);
-                    p.setString(6,staff);time(p,7,now);time(p,8,now);p.executeUpdate();}
+                    p.setString(6,staff);time(p,7,now);time(p,8,now);p.setString(9,method);p.setBoolean(10,fastpass);p.executeUpdate();}
                 c.commit();return order(guild,id);
             } catch(SQLException ex){c.rollback();throw ex;}
         } catch(SQLException ex){throw failed(ex);}
@@ -132,7 +141,7 @@ final class TicketOrderStore {
     }
     List<Order> orders(String guild,boolean activeOnly) throws SQLException {
         String query="SELECT * FROM guild_orders WHERE guild_id=?"+(activeOnly?" AND status NOT IN ('DONE','CANCELLED')":"")+" ORDER BY created_at,order_id";
-        try(var c=database.connection();var p=c.prepareStatement(query)){p.setString(1,guild);try(var r=p.executeQuery()){var out=new ArrayList<Order>();while(r.next())out.add(order(r));return List.copyOf(out);}}
+        try(var c=database.connection();var p=c.prepareStatement(query)){p.setString(1,guild);try(var r=p.executeQuery()){var out=new ArrayList<Order>();while(r.next())out.add(order(r));return OrderPolicy.priorityOrder(out);}}
         catch(SQLException ex){throw failed(ex);}
     }
     boolean transition(String guild,long id,String expected,String next,String actor,String interactionId) throws SQLException {

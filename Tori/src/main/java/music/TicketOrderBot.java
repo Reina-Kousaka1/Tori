@@ -36,7 +36,9 @@ final class TicketOrderBot extends CommandListener {
         c.addSubcommands(new SubcommandData("create", "Create an order")
             .addOptions(new OptionData(OptionType.USER,"customer","Customer",true), new OptionData(OptionType.STRING,"product","Product or service",true).setMaxLength(100),
                 new OptionData(OptionType.STRING,"description","Order details",true).setMaxLength(1000),
-                new OptionData(OptionType.USER,"assigned_staff","Assigned staff member",false)),
+                new OptionData(OptionType.USER,"assigned_staff","Assigned staff member",false),
+                new OptionData(OptionType.STRING,"payment_method","Payment method label (e.g. PayPal, Cash App, Robux)",false).setMaxLength(PaymentMethodPolicy.MAX_LENGTH),
+                new OptionData(OptionType.BOOLEAN,"fastpass","Prioritize ahead of waiting standard orders",false)),
             new SubcommandData("view", "View an order").addOption(OptionType.INTEGER,"id","Order ID",true),
             new SubcommandData("queue", "View active guild queue"),
             new SubcommandData("assign", "Assign an order to staff").addOptions(new OptionData(OptionType.INTEGER,"id","Order ID",true),new OptionData(OptionType.USER,"staff","Staff member",true)),
@@ -148,13 +150,16 @@ final class TicketOrderBot extends CommandListener {
                 requireStaff(e.getMember(),cfg.staffRoleId()); var customer=e.getOption("customer").getAsUser();
                 String product=e.getOption("product").getAsString(), desc=e.getOption("description").getAsString();
                 String assigned=e.getOption("assigned_staff")==null?null:e.getOption("assigned_staff").getAsUser().getId();
-                var order=store.createOrder(guild,customer.getId(),product,desc,assigned);
+                String paymentMethod=e.getOption("payment_method")==null?null:e.getOption("payment_method").getAsString();
+                boolean fastpass=e.getOption("fastpass")!=null&&e.getOption("fastpass").getAsBoolean();
+                var order=store.createOrder(guild,customer.getId(),product,desc,assigned,paymentMethod,fastpass);
                 var channel=cfg.orderChannelId()==null?null:e.getGuild().getTextChannelById(cfg.orderChannelId());
                 if(channel==null)return "Order #"+order.id()+" was saved, but no valid order channel is configured. Configure one with /order config.";
                 try {
                     var active=store.orders(guild,true);
                     var message=channel.sendMessageEmbeds(orderEmbed(order,position(order,active))).setComponents(orderButtons(order.id(),false)).setAllowedMentions(List.of()).complete();
                     store.postOrder(guild,order.id(),channel.getId(),message.getId());
+                    refreshActivePosts(e.getGuild(),store.orders(guild,true));
                     return "Created order #"+order.id()+" and posted it in <#"+channel.getId()+">.";
                 } catch(Exception ex) { return "Order #"+order.id()+" is saved, but its Discord post failed. It remains in the database; check channel permissions and create a replacement post after review."; }
             }
@@ -313,7 +318,10 @@ final class TicketOrderBot extends CommandListener {
         if(order.status().equals(status))return "Order #"+id+" is already "+status+".";
         if(!OrderPolicy.validTransition(order.status(),status))return "Completed or cancelled orders cannot be reopened from the buttons.";
         var currentQueue=store.orders(guild,true);
-        if(status.equals("PROCESSING")&&!OrderPolicy.mayProcess(cfg.queueMode(),currentQueue,id))return "Sequential mode allows one processing order at a time.";
+        if(status.equals("PROCESSING")&&!OrderPolicy.mayProcess(cfg.queueMode(),currentQueue,id)) {
+            boolean processing=currentQueue.stream().anyMatch(queuedOrder->queuedOrder.id()!=id&&queuedOrder.status().equals("PROCESSING"));
+            return processing?"Sequential mode allows one processing order at a time.":"A fastpass order is ahead in the queue; start it first.";
+        }
         if(!store.transition(guild,id,order.status(),status,e.getUser().getId(),e.getId()))return "Order changed in another action; refresh and try again.";
         var latest=store.order(guild,id); var active=store.orders(guild,true); refreshOrder(e.getGuild(),latest,active); refreshActivePosts(e.getGuild(),active); return "Order #"+id+" updated to "+status+".";
     }
@@ -357,7 +365,9 @@ final class TicketOrderBot extends CommandListener {
     private static net.dv8tion.jda.api.entities.MessageEmbed orderEmbed(TicketOrderStore.Order o,int position) {
         return new EmbedBuilder().setTitle("📦 ORDER #"+o.id()).addField("Customer","<@"+o.customerId()+">",true)
             .addField("Product",o.product(),true).addField("Assigned Staff",o.assignedStaffId()==null?"Unassigned":"<@"+o.assignedStaffId()+">",true)
-            .addField("Status",o.status(),true).addField("Queue Position",position<1?"—":"#"+position,true)
+            .addField("Status",o.status(),true).addField("Queue Position",position<1?"-":"#"+position,true)
+            .addField("Payment method",o.paymentMethod().isBlank()?"Not specified":o.paymentMethod(),true)
+            .addField("Fastpass",o.fastpass()?"Yes":"No",true)
             .addField("Created",DATE.format(o.createdAt()),true).addField("Description",o.description(),false)
             .addField("Ticket",o.ticketId()==null?"—":"#"+o.ticketId(),true).build();
     }
@@ -366,9 +376,21 @@ final class TicketOrderBot extends CommandListener {
         return OrderPolicy.position(target.id(),active);
     }
     private static String orderText(TicketOrderStore.Order o,List<TicketOrderStore.Order> active) {
+        String payment=o.paymentMethod().isBlank()?"Not specified":o.paymentMethod();
+        return orderTextBase(o,active)+"\nPayment method: "+payment+"\nFastpass: "+(o.fastpass()?"Yes":"No");
+    }
+    private static String orderTextBase(TicketOrderStore.Order o,List<TicketOrderStore.Order> active) {
         return "Order #"+o.id()+" · "+o.status()+" · queue "+(position(o,active)==0?"—":"#"+position(o,active))+"\nCustomer: <@"+o.customerId()+">\nProduct: "+o.product()+"\nAssigned: "+(o.assignedStaffId()==null?"unassigned":"<@"+o.assignedStaffId()+">")+"\n"+o.description()+(o.ticketId()==null?"":"\nTicket #"+o.ticketId());
     }
     private static String queueText(List<TicketOrderStore.Order> orders,String mode) {
+        String queue=queueTextBase(orders,mode);
+        var fastpassIds=orders.stream().filter(TicketOrderStore.Order::fastpass)
+            .map(order->"#"+order.id()).toList();
+        if(fastpassIds.isEmpty())return queue;
+        String note="\nFastpass priority: "+String.join(", ",fastpassIds);
+        return queue.length()+note.length()<=1900?queue+note:queue;
+    }
+    private static String queueTextBase(List<TicketOrderStore.Order> orders,String mode) {
         if(orders.isEmpty())return "ORDER QUEUE\nNo active orders.";
         var out=new StringBuilder("ORDER QUEUE · ").append(mode).append("\n"); int shown=0;
         for(int i=0;i<orders.size();i++){var o=orders.get(i);String line="#"+(i+1)+" Order "+o.id()+" — "+o.status()+" — "+o.product()+"\n";if(out.length()+line.length()>1750)break;out.append(line);shown++;}
