@@ -4,6 +4,7 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.exceptions.ErrorResponseException;
 import net.dv8tion.jda.api.entities.MessageEmbed;
+import net.dv8tion.jda.api.components.actionrow.ActionRow;
 import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Set;
@@ -57,10 +58,19 @@ public abstract class CommandListener extends ListenerAdapter implements AutoClo
                         Language currentLanguage = language(event);
                         String message = null;
                         MessageEmbed embed = null;
+                        List<ActionRow> components = List.of();
                         Runnable onDelivered = () -> {};
                         try {
-                            embed = handleEmbed(event, currentLanguage);
-                            if (embed == null) message = handle(event, currentLanguage);
+                            var context = new CommandContext(event);
+                            var view = handleView(context, currentLanguage);
+                            if (view != null) {
+                                embed = view.embed();
+                                components = view.components();
+                            } else {
+                                embed = handleEmbed(event, currentLanguage);
+                                if (embed == null) message = handle(event, currentLanguage);
+                                components = replyComponents(context, currentLanguage);
+                            }
                             onDelivered = afterReply(event);
                         }
                         catch (UserError ex) { message = ex.localized(currentLanguage); }
@@ -74,6 +84,7 @@ public abstract class CommandListener extends ListenerAdapter implements AutoClo
                         }
                         Runnable delivered = onDelivered;
                         var reply = embed == null ? hook.editOriginal(clip(message, 1950)) : hook.editOriginalEmbeds(embed);
+                        if (!components.isEmpty()) reply.setComponents(components);
                         reply.setAllowedMentions(List.of()).queue(ignored -> delivered.run(),
                             failure -> interactionFailure(event, "response", failure));
                     } finally { slots.release(); }
@@ -108,6 +119,12 @@ public abstract class CommandListener extends ListenerAdapter implements AutoClo
     protected String handle(CommandContext event, Language language) { throw new UserError("error.unknown"); }
     protected MessageEmbed handleEmbed(SlashCommandInteractionEvent event, Language language) { return handleEmbed(new CommandContext(event), language); }
     protected MessageEmbed handleEmbed(CommandContext event, Language language) { return null; }
+    protected record CommandView(MessageEmbed embed, List<ActionRow> components) {
+        protected CommandView { components = List.copyOf(components); }
+    }
+    protected CommandView handleView(CommandContext event, Language language) { return null; }
+    /** Optional controls for the initial response; defaults to none. */
+    protected List<ActionRow> replyComponents(CommandContext event, Language language) { return List.of(); }
     /** Runs only after a successful command's response reaches Discord. */
     protected Runnable afterReply(SlashCommandInteractionEvent event) { return afterReply(new CommandContext(event)); }
     protected Runnable afterReply(CommandContext event) { return () -> {}; }
@@ -124,10 +141,18 @@ public abstract class CommandListener extends ListenerAdapter implements AutoClo
                     var context = new CommandContext(message, name, options);
                     MessageEmbed embed = null;
                     String text = null;
+                    List<ActionRow> components = List.of();
                     Runnable delivered = () -> {};
                     try {
-                        embed = handleEmbed(context, language);
-                        if (embed == null) text = handle(context, language);
+                        var view = handleView(context, language);
+                        if (view != null) {
+                            embed = view.embed();
+                            components = view.components();
+                        } else {
+                            embed = handleEmbed(context, language);
+                            if (embed == null) text = handle(context, language);
+                            components = replyComponents(context, language);
+                        }
                         delivered = afterReply(context);
                     } catch (UserError ex) { text = ex.localized(language); }
                     catch (IllegalArgumentException ex) { text = Messages.text(language, "error.input"); }
@@ -137,6 +162,7 @@ public abstract class CommandListener extends ListenerAdapter implements AutoClo
                     }
                     var reply = embed == null ? message.getChannel().sendMessage(clip(text, 1950)) : message.getChannel().sendMessageEmbeds(embed);
                     Runnable callback = delivered;
+                    if (!components.isEmpty()) reply.setComponents(components);
                     reply.setAllowedMentions(List.of()).queue(ignored -> callback.run(),
                         ex -> LoggerFactory.getLogger(getClass()).warn("Prefix response failed ({})", ex.getClass().getSimpleName()));
                 } finally { slots.release(); }

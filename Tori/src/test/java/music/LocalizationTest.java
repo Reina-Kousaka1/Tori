@@ -23,21 +23,25 @@ class LocalizationTest {
         return java.util.regex.Pattern.compile("(?<!%)%s").matcher(template).results().count();
     }
     @ParameterizedTest @EnumSource(Language.class)
-    void helpContainsEveryCommandAndFitsOneMessage(Language language) {
+    void helpOverviewIsCompactAndEachCategoryContainsItsRegisteredCommands(Language language) {
         var commands = new ArrayList<>(MusicBot.commands());
         commands.addAll(ModerationBot.commands()); commands.addAll(GeneralBot.commands()); commands.addAll(TicketOrderBot.commands());
         String help = GeneralBot.help(language);
         assertTrue(help.length() <= 1950);
-        for (var command : commands) assertTrue(help.contains("/" + command.getName()), command.getName());
+        assertTrue(help.contains(Messages.text(language, "help.v2.select")) || help.contains(Messages.text(language, "help.v2.intro")));
+        for (var command : commands) {
+            boolean found = false;
+            for (var section : ToriHelp.Section.values())
+                found |= ToriHelp.category(language, section).getDescription().contains("/" + command.getName() + "`");
+            assertTrue(found, command.getName());
+        }
         assertFalse(help.contains(language.label));
         var embed = GeneralBot.helpEmbed(language);
-        assertEquals(4, embed.getFields().size());
+        assertEquals(ToriHelp.Section.values().length, embed.getFields().size());
         for (var field : embed.getFields()) {
             assertFalse(field.isInline());
             assertTrue(field.getValue().length() <= 1024);
         }
-        assertTrue(embed.getFields().get(2).getValue().contains("/avatar user_id:"));
-        assertTrue(embed.getFields().get(3).getValue().contains("/status action:stop"));
     }
     @Test void allCommandAndOptionDescriptionsAreLocalized() throws Exception {
         var commands = new ArrayList<>(MusicBot.commands());

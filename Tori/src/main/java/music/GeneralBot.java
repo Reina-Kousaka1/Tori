@@ -12,6 +12,9 @@ import net.dv8tion.jda.api.events.session.ReadyEvent;
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
+import net.dv8tion.jda.api.components.actionrow.ActionRow;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.interactions.commands.build.*;
@@ -27,6 +30,16 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class GeneralBot extends CommandListener {
     private static final SecureRandom GAME_RANDOM = new SecureRandom();
     private static final long MAX_DISCORD_INTEGER = 9_007_199_254_740_991L;
+    private static final Set<String> ECONOMY_COMMANDS = Set.of(
+        "balance", "daily", "beg", "work", "loot", "transfer", "gamble", "slots", "leaderboard",
+        "grantcredits", "grantitem", "shop", "buy", "sell", "inventory", "equip", "unequip", "tools",
+        "fish", "mine", "chop", "craft", "repair", "opencrate", "market", "iteminfo", "pricehistory");
+    private static Set<String> commandNames() {
+        var names = new HashSet<>(ECONOMY_COMMANDS);
+        names.addAll(Set.of("prefix", "language", "help", "ping", "stats", "status",
+            "restart", "shutdown", "uptime", "avatar"));
+        return Set.copyOf(names);
+    }
     private final StatusRotation rotation;
     private final long configuredOwnerId;
     private final Runnable restart;
@@ -63,10 +76,7 @@ public final class GeneralBot extends CommandListener {
         this(languages, rotation, ownerId, restart, startedAt, Clock.systemUTC());
     }
     GeneralBot(LanguageStore languages, StatusRotation rotation, long ownerId, Runnable restart, Instant startedAt, Clock clock) {
-        super(Set.of("prefix", "language", "help", "ping", "stats", "status", "restart", "shutdown", "uptime", "avatar",
-            "balance", "daily", "beg", "work", "loot", "transfer", "gamble", "slots", "leaderboard",
-            "grantcredits", "grantitem", "shop", "buy", "sell", "inventory", "equip", "unequip", "tools",
-            "fish", "mine", "chop", "craft", "repair", "opencrate", "market", "iteminfo", "pricehistory"), languages);
+        super(commandNames(), languages);
         this.rotation = rotation;
         this.configuredOwnerId = ownerId;
         this.restart = restart;
@@ -196,9 +206,7 @@ public final class GeneralBot extends CommandListener {
         ));
     }
     @Override protected String handle(CommandContext event, Language language) {
-        if (Set.of("balance", "daily", "beg", "work", "loot", "transfer", "gamble", "slots", "leaderboard",
-            "grantcredits", "grantitem", "shop", "buy", "sell", "inventory", "equip", "unequip", "tools", "fish", "mine", "chop",
-            "craft", "repair", "opencrate", "market", "iteminfo", "pricehistory").contains(event.getName())) return economy(event, language);
+        if (ECONOMY_COMMANDS.contains(event.getName())) return economy(event, language);
         if (event.getName().equals("prefix")) {
             require(prefixes != null, "prefix.unavailable");
             var option = event.getOption("value");
@@ -357,9 +365,9 @@ public final class GeneralBot extends CommandListener {
         var owner = selected == null ? event.getUser() : selected.getAsUser();
         var items = currency.inventory(owner.getId());
         if (items.isEmpty()) return Messages.text(language, "inventory.empty", owner.getEffectiveName());
-        String content = String.join(", ", items.stream().map(item -> {
+        String content = String.join("\n", items.stream().map(item -> {
             var catalog = ShopCatalog.find(item.id());
-            return (catalog == null ? item.id() : catalog.name()) + " × " + item.quantity();
+            return "• " + (catalog == null ? item.id() : catalog.name()) + " × " + item.quantity();
         }).toList());
         return Messages.text(language, "inventory.result", owner.getEffectiveName(), content);
     }
@@ -611,19 +619,99 @@ public final class GeneralBot extends CommandListener {
     public static String help(Language language) {
         var embed = helpEmbed(language);
         var text = new StringBuilder(embed.getTitle());
+        if (embed.getDescription() != null) text.append("\n").append(embed.getDescription());
         for (var field : embed.getFields()) text.append("\n\n").append(field.getName()).append("\n").append(field.getValue());
         return text.toString();
     }
     public static MessageEmbed helpEmbed(Language language) {
-        var embed = ToriEmbeds.create(ToriEmbeds.Category.INFO, language)
-            .setTitle(Messages.text(language, "help.title"));
-        for (String section : List.of("music", "moderation", "general", "owner")) {
-            String body = Messages.text(language, "help." + section + ".body");
-            if (section.equals("general")) body += "\n" + Messages.text(language, "help.economy.body")
-                + "\n" + Messages.text(language, "help.economy.market");
-            embed.addField(Messages.text(language, "help." + section + ".title"), body, false);
+        return ToriHelp.overview(language);
+    }
+    @Override protected List<ActionRow> replyComponents(CommandContext event, Language language) {
+        return event.getName().equals("help") ? ToriHelp.menu(event.getUser().getId(), language) : List.of();
+    }
+    @Override public void onStringSelectInteraction(StringSelectInteractionEvent event) {
+        String id = event.getComponentId();
+        if (!id.startsWith("tori:help:")) return;
+        if (event.getGuild() == null || !id.equals("tori:help:" + event.getUser().getId())) {
+            event.reply("Only the person who opened this help menu can change it. Use /help for your own.")
+                .setEphemeral(true).queue();
+            return;
         }
-        return embed.build();
+        try {
+            var section = ToriHelp.Section.valueOf(event.getValues().getFirst());
+            Language language = languages.get(event.getGuild().getId());
+            event.editMessageEmbeds(ToriHelp.category(language, section))
+                .setComponents(ToriHelp.menu(event.getUser().getId(), language)).queue();
+        } catch (IllegalArgumentException ex) {
+            event.reply("Unknown help category. Please use /help again.").setEphemeral(true).queue();
+        }
+    }
+    @Override protected CommandView handleView(CommandContext event, Language language) {
+        if (!event.getName().equals("shop")) return null;
+        String category = event.getOption("category") == null ? "all"
+            : event.getOption("category").getAsString().strip().toLowerCase(Locale.ROOT);
+        try {
+            return shopView(event.getGuild().getId(), event.getUser().getId(), category, 0, language);
+        } catch (CurrencyStoreException ex) {
+            throw new UserError("economy.unavailable");
+        }
+    }
+    private CommandView shopView(String guildId, String userId, String category, int requested, Language language)
+        throws CurrencyStoreException {
+        require(currency != null, "economy.unavailable");
+        require(category.equals("all") || category.matches("[a-z0-9_-]{1,64}"), "shop.category");
+        Instant now = clock.instant();
+        if (market == null) {
+            var items = currency.shop().stream().filter(ShopCatalog.Item::buyable)
+                .filter(item -> category.equals("all") || item.category().equals(category)
+                    || category.equals("utility") && Set.of("common", "tools").contains(item.category())).toList();
+            var page = ToriShopUi.page(items.size(), requested);
+            var entries = new ArrayList<ToriShopUi.Entry>();
+            for (var item : items.subList(page.from(), page.to()))
+                entries.add(new ToriShopUi.Entry(item.id(), item.name(), item.price() + " credits"));
+            return new CommandView(ToriShopUi.render(language, entries, page, category),
+                ToriShopUi.controls(userId, category, page, language));
+        }
+        var items = market.products(category, now).stream().filter(DeseModels.Product::available).toList();
+        var page = ToriShopUi.page(items.size(), requested);
+        var entries = new ArrayList<ToriShopUi.Entry>();
+        for (var item : items.subList(page.from(), page.to())) {
+            long price = market.quote(guildId, userId, item.id(), now);
+            entries.add(new ToriShopUi.Entry(item.id(), item.name(), price < 0
+                ? Messages.text(language, "market.price.unavailable") : price + " credits"));
+        }
+        var note = new StringBuilder(Messages.text(language, "market.quote.note"));
+        var sales = market.activeSales(now);
+        for (var sale : sales.stream().limit(3).toList()) {
+            String target = sale.productId() == null ? sale.category() : sale.productId();
+            note.append("\n").append(Messages.text(language, "market.sales.active", sale.discountPercent(),
+                target, sale.endsAt().getEpochSecond()));
+        }
+        if (sales.size() > 3) note.append("\n…");
+        return new CommandView(ToriShopUi.render(language, entries, page, category, note.toString()),
+            ToriShopUi.controls(userId, category, page, language));
+    }
+    @Override public void onButtonInteraction(ButtonInteractionEvent event) {
+        String id = event.getComponentId();
+        if (!id.startsWith("tori:s:")) return;
+        String[] parts = id.split(":", -1);
+        if (event.getGuild() == null || parts.length != 5 || !parts[2].equals(event.getUser().getId())
+            || !parts[3].matches("all|[a-z0-9_-]{1,64}") || !parts[4].matches("[0-9]{1,5}")) {
+            event.reply("This shop page belongs to another person or is no longer valid. Use /shop.")
+                .setEphemeral(true).queue();
+            return;
+        }
+        int requested = Integer.parseInt(parts[4]);
+        event.deferEdit().queue(hook -> serial(event.getGuild().getIdLong(), () -> {
+            Language language = languages.get(event.getGuild().getId());
+            try {
+                var view = shopView(event.getGuild().getId(), event.getUser().getId(), parts[3], requested, language);
+                hook.editOriginalEmbeds(view.embed()).setComponents(view.components()).queue();
+            } catch (Exception ex) {
+                org.slf4j.LoggerFactory.getLogger(GeneralBot.class).warn("Shop page failed ({})", ex.getClass().getSimpleName());
+                hook.sendMessage(Messages.text(language, "economy.unavailable")).setEphemeral(true).queue();
+            }
+        }));
     }
     @Override protected MessageEmbed handleEmbed(CommandContext event, Language language) {
         if (event.getName().equals("help")) return helpEmbed(language);
@@ -646,8 +734,8 @@ public final class GeneralBot extends CommandListener {
                 String owner = configuredOwnerId == 0 ? Messages.text(language, "stats.unset") : "<@" + configuredOwnerId + ">";
                 var guild = event.getGuild();
                 var channel = event.getChannel();
-                embed.addField(Messages.text(language, "stats.guild"), clip(guild.getName(), 200) + " (`" + guild.getId() + "`)", false)
-                    .addField(Messages.text(language, "stats.channel"), "<#" + channel.getId() + "> (`" + channel.getId() + "`)", false)
+                embed.addField(Messages.text(language, "stats.guild"), clip(guild.getName(), 200) + "\n`" + guild.getId() + "`", false)
+                    .addField(Messages.text(language, "stats.channel"), "<#" + channel.getId() + ">\n`" + channel.getId() + "`", false)
                     .addField(Messages.text(language, "stats.owner"), owner, true)
                     .addField(Messages.text(language, "stats.creator"), creator == null || creator.isBlank() ? Messages.text(language, "stats.unset") : clip(creator, 200), true)
                     .addField(Messages.text(language, "stats.code"), "Java 21 · JDA · Lavalink ❤️", false)
@@ -661,6 +749,17 @@ public final class GeneralBot extends CommandListener {
                 }
             }
             return embed.build();
+        }
+        if (ECONOMY_COMMANDS.contains(event.getName()) && !event.getName().equals("shop")) {
+            var category = event.getName().equals("leaderboard") ? ToriEmbeds.Category.HIGHLIGHT
+                : ToriEmbeds.Category.DEFAULT;
+            return ToriEmbeds.text(category, language, "/" + event.getName(), economy(event, language)).build();
+        }
+        if (Set.of("prefix", "language", "ping", "uptime", "status", "restart", "shutdown")
+            .contains(event.getName())) {
+            var category = Set.of("restart", "shutdown").contains(event.getName())
+                ? ToriEmbeds.Category.WARNING : ToriEmbeds.Category.DEFAULT;
+            return ToriEmbeds.text(category, language, "/" + event.getName(), handle(event, language)).build();
         }
         if (!event.getName().equals("avatar")) return null;
         var option = event.getOption("user_id");

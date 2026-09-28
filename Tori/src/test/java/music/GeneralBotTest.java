@@ -131,7 +131,8 @@ class GeneralBotTest {
     @Test void helpIsAnEmbedAndAvatarIsPublicWithAnIdLookup() throws Exception {
         var fixture = new Fixture();
         try (var bot = bot(new StatusRotation())) {
-            assertEquals(4, bot.handleEmbed(fixture.event("help", CALLER), Language.EN).getFields().size());
+            assertEquals(ToriHelp.Section.values().length,
+                bot.handleEmbed(fixture.event("help", CALLER), Language.EN).getFields().size());
             var avatar = bot.handleEmbed(fixture.event("avatar", CALLER, Map.of("user_id", " " + TEAM_OWNER + " ")), Language.EN);
             assertEquals(Long.toString(TEAM_OWNER), fixture.avatarLookup);
             assertEquals(ToriEmbeds.footer(Language.EN, "ID: " + TEAM_OWNER), avatar.getFooter().getText());
