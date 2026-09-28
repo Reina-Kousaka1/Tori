@@ -10,7 +10,6 @@ import net.dv8tion.jda.api.components.buttons.Button;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.*;
 import net.dv8tion.jda.api.components.actionrow.ActionRow;
-import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.channel.concrete.Category;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.utils.FileUpload;
@@ -81,12 +80,17 @@ final class TicketOrderBot extends CommandListener {
         if (event.getGuild() == null) { event.reply("This command can only be used in a server.").setEphemeral(true).queue(); return; }
         event.deferReply(true).queue(hook -> serial(event.getGuild().getIdLong(), () -> {
             String result;
+            boolean failed = false;
             try { result = handleCommand(event); }
             catch (Exception ex) {
                 LoggerFactory.getLogger(TicketOrderBot.class).warn("Ticket/order command failed ({})", ex.getClass().getSimpleName());
                 result = "The action could not be completed. If this persists, contact a server administrator.";
+                failed = true;
             }
-            hook.editOriginal(result).setAllowedMentions(List.of()).queue(null,
+            var style = failed ? ToriEmbeds.Category.ERROR : ToriEmbeds.Category.INFO;
+            var title = "/" + event.getName() + (event.getSubcommandName() == null ? "" : " " + event.getSubcommandName());
+            var embed = ToriEmbeds.text(style, languages.get(event.getGuild().getId()), title, result).build();
+            hook.editOriginalEmbeds(embed).setAllowedMentions(List.of()).queue(null,
                 failure -> LoggerFactory.getLogger(TicketOrderBot.class).warn("Ticket/order response failed ({})", failure.getClass().getSimpleName()));
         }));
     }
@@ -214,7 +218,9 @@ final class TicketOrderBot extends CommandListener {
             case "panel" -> {
                 requireAdmin(e.getMember()); TextChannel channel=e.getOption("channel").getAsChannel().asTextChannel();
                 var copy=TicketText.from(cfg);
-                channel.sendMessage(copy.panelMessage()).setComponents(ActionRow.of(Button.primary(OPEN_BUTTON,copy.buttonLabel())))
+                channel.sendMessageEmbeds(ToriEmbeds.text(ToriEmbeds.Category.INFO, languages.get(guild),
+                        copy.panelTitle(), copy.panelBody()).build())
+                    .setComponents(ActionRow.of(Button.primary(OPEN_BUTTON,copy.buttonLabel())))
                     .setAllowedMentions(List.of()).complete();
                 store.configure(guild,"ticket_panel_channel_id",channel.getId()); return "Ticket panel posted in <#"+channel.getId()+">.";
             }
@@ -281,7 +287,8 @@ final class TicketOrderBot extends CommandListener {
         try { ticket=store.createTicket(guildId,ticketId,creator,category,channel.getId()); }
         catch(Exception ex) { channel.delete().complete(); throw ex; }
         var copy=TicketText.from(cfg);
-        channel.sendMessage(copy.welcomeMessage(ticket.id(),category,creator))
+        channel.sendMessageEmbeds(ToriEmbeds.text(ToriEmbeds.Category.INFO, languages.get(guildId),
+                "Ticket #" + ticket.id(), copy.welcomeMessage(ticket.id(),category,creator)).build())
             .setComponents(ActionRow.of(Button.secondary("tori:ticket:claim",copy.claimLabel()),
                 Button.danger("tori:ticket:close",copy.closeLabel()),Button.danger("tori:ticket:delete",copy.deleteLabel())))
             .setAllowedMentions(List.of()).complete();
@@ -362,13 +369,23 @@ final class TicketOrderBot extends CommandListener {
     }
     static List<ActionRow> orderButtons(long id,boolean disabled) { return List.of(ActionRow.of(
         Button.secondary("tori:order:"+id+":NOTED","♡ noted").withDisabled(disabled),Button.primary("tori:order:"+id+":PROCESSING","💌 processing").withDisabled(disabled),Button.success("tori:order:"+id+":DONE","❕ done").withDisabled(disabled))); }
-    private static net.dv8tion.jda.api.entities.MessageEmbed orderEmbed(TicketOrderStore.Order o,int position) {
-        return new EmbedBuilder().setTitle("📦 ORDER #"+o.id()).addField("Customer","<@"+o.customerId()+">",true)
-            .addField("Product",o.product(),true).addField("Assigned Staff",o.assignedStaffId()==null?"Unassigned":"<@"+o.assignedStaffId()+">",true)
-            .addField("Status",o.status(),true).addField("Queue Position",position<1?"-":"#"+position,true)
-            .addField("Payment method",o.paymentMethod().isBlank()?"Not specified":o.paymentMethod(),true)
+    static net.dv8tion.jda.api.entities.MessageEmbed orderEmbed(TicketOrderStore.Order o,int position) {
+        var color = switch (o.status()) {
+            case "PROCESSING" -> ToriEmbeds.Category.HIGHLIGHT;
+            case "DONE" -> ToriEmbeds.Category.SUCCESS;
+            case "CANCELLED" -> ToriEmbeds.Category.ERROR;
+            default -> ToriEmbeds.Category.DEFAULT;
+        };
+        return ToriEmbeds.create(color, Language.EN).setTitle("📦 ORDER #"+o.id())
+            .addField("Product",ToriEmbeds.shorten(o.product(), 100),false)
+            .addField("Customer","<@"+o.customerId()+">",true)
+            .addField("Assigned Staff",o.assignedStaffId()==null?"Unassigned":"<@"+o.assignedStaffId()+">",true)
+            .addField("Status",o.status(),true)
+            .addField("Queue Position",position<1?"—":"#"+position,true)
+            .addField("Description",ToriEmbeds.shorten(o.description(),1000),false)
+            .addField("Payment method",o.paymentMethod().isBlank()?"Not specified":ToriEmbeds.shorten(o.paymentMethod(),100),true)
             .addField("Fastpass",o.fastpass()?"Yes":"No",true)
-            .addField("Created",DATE.format(o.createdAt()),true).addField("Description",o.description(),false)
+            .addField("Created",DATE.format(o.createdAt()),true)
             .addField("Ticket",o.ticketId()==null?"—":"#"+o.ticketId(),true).build();
     }
     private static int position(TicketOrderStore.Order target,List<TicketOrderStore.Order> active) {
