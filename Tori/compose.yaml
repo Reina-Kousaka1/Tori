@@ -87,5 +87,6 @@ services:
       LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:?Passwort in .env setzen}
       TORI_ECONOMY_URL: http://economy-api:4001
       TORI_ECONOMY_API_SECRET: ${TORI_ECONOMY_API_SECRET:?Economy-API-Secret in .env setzen}
+      TORI_ECONOMY_ROUTING: "${TORI_ECONOMY_ROUTING:-balance=LEGACY,inventory=LEGACY,shop=LEGACY,leaderboard=LEGACY,daily=LEGACY,transfer=LEGACY}"
 volumes:
   postgres-data:

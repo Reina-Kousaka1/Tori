@@ -6,9 +6,10 @@ database as Java. It adds no database container, data volume, or host-published
 API port. Compose restarts the API unless it was explicitly stopped; its health
 check verifies PostgreSQL through the API's internal health route.
 
-The API is initially read-only and Java routing remains `LEGACY`. The commands
-below are operator instructions; do not run them against production until the
-backup and restore comparisons pass.
+The API is initially read-only and Java routing remains `LEGACY`, including
+when an older `.env` contains the retired balance-only Elixir switch. The
+commands below are operator instructions; do not run them against production
+until the backup and restore comparisons pass.
 
 ## Prepare secrets and build
 
@@ -29,7 +30,7 @@ Do not paste secrets into commands, commit `.env`, or reuse the Discord token
 as an API secret. Keep these initial values in `.env`:
 
 ```dotenv
-TORI_ECONOMY_ROUTING=
+TORI_ECONOMY_ROUTING=balance=LEGACY,inventory=LEGACY,shop=LEGACY,leaderboard=LEGACY,daily=LEGACY,transfer=LEGACY
 TORI_ECONOMY_WRITE_ENABLED=false
 TORI_ECONOMY_WRITE_MODE=disabled
 TORI_ECONOMY_PRODUCTION_DATABASE_NAME=
@@ -93,7 +94,7 @@ was promoted; do not apply an extra SQL copy manually. Java's existing Flyway
 startup applies V5 when the rebuilt bot starts.
 
 Before that start, verify that `.env` still has all writes disabled and that
-`TORI_ECONOMY_ROUTING` is blank or contains only `LEGACY` entries. Then run:
+`TORI_ECONOMY_ROUTING` contains only `LEGACY` entries. Then run:
 
 ```sh
 docker compose up -d --build economy-api bot
@@ -155,7 +156,7 @@ Before cutover, ensure `.env` has:
 ```dotenv
 TORI_ECONOMY_WRITE_ENABLED=false
 TORI_ECONOMY_WRITE_MODE=disabled
-TORI_ECONOMY_ROUTING=
+TORI_ECONOMY_ROUTING=balance=LEGACY,inventory=LEGACY,shop=LEGACY,leaderboard=LEGACY,daily=LEGACY,transfer=LEGACY
 ```
 
 After backup/restore, V5, database contents, and single-instance ownership are
@@ -204,7 +205,7 @@ until the checks above are complete. The Compose defaults keep every route
 To stop Elixir writes and return both commands to Java, first set:
 
 ```dotenv
-TORI_ECONOMY_ROUTING=daily=LEGACY,transfer=LEGACY
+TORI_ECONOMY_ROUTING=balance=LEGACY,inventory=LEGACY,shop=LEGACY,leaderboard=LEGACY,daily=LEGACY,transfer=LEGACY
 TORI_ECONOMY_WRITE_ENABLED=false
 TORI_ECONOMY_WRITE_MODE=disabled
 TORI_ECONOMY_PRODUCTION_DATABASE_NAME=
