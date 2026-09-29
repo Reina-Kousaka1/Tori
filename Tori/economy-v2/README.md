@@ -22,6 +22,11 @@ und Command-Routing sind noch nicht implementiert.
   Bytes). Standard-Bind-Adresse ist `127.0.0.1:4001`.
 - `sql/draft/V5__economy_v2_core.sql` ist bewusst **nicht** im Flyway-Pfad.
   Es wurde keine Migration ausgeführt. Bestehende V1–V4-Dateien sind unverändert.
+- `TORI_MARKET_MODE=LEGACY` (Standard) erhaelt den Java-Market. Mit
+  `TORI_MARKET_MODE=READ_ONLY` bleiben Produkt-/Preis-/History-Ansichten
+  verfuegbar, aber Quote-Writes, Kaeufe, Admin-Aenderungen und Scheduler-Writes
+  sind gesperrt. `V2` wird beim Start abgelehnt, solange kein V2-Market existiert.
+- Paritaet, Backfill- und Restore-Anleitung: `../docs/ECONOMY-V2-READINESS.md`.
 
 ## Vor produktiven Writes
 

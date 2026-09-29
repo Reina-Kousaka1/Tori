@@ -88,6 +88,51 @@ defmodule ToriEconomy.LedgerIntegrationTest do
              ).rows
   end
 
+  test "parallel identical daily requests commit exactly once" do
+    actor = user_id()
+    original = request("daily.claim", actor, user_id())
+
+    results =
+      1..8
+      |> Task.async_stream(
+        fn _ -> Accounts.execute(%{original | request_id: request_id()}) end,
+        max_concurrency: 8,
+        timeout: 15_000
+      )
+      |> Enum.map(fn {:ok, {:ok, result}} -> result end)
+
+    assert Enum.all?(results, &(&1["status"] == "ok"))
+    assert Enum.uniq(Enum.map(results, & &1["result"])) == [hd(results)["result"]]
+    assert [[150]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [actor]).rows
+    assert [[1]] =
+             Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [original.idempotency_key]).rows
+  end
+
+  test "opposing transfers finish without a lock-order deadlock" do
+    first = user_id()
+    second = user_id()
+    assert {:ok, _} = Accounts.execute(request("daily.claim", first, user_id()))
+    assert {:ok, _} = Accounts.execute(request("daily.claim", second, user_id()))
+
+    requests = [
+      request("wallet.transfer", first, user_id(), %{"recipient_user_id" => second, "amount" => "50"}),
+      request("wallet.transfer", second, user_id(), %{"recipient_user_id" => first, "amount" => "50"})
+    ]
+
+    results =
+      requests
+      |> Task.async_stream(&Accounts.execute/1, max_concurrency: 2, timeout: 15_000)
+      |> Enum.map(fn {:ok, {:ok, result}} -> result end)
+
+    assert Enum.all?(results, &(&1["status"] == "ok"))
+    assert [[150]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [first]).rows
+    assert [[150]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [second]).rows
+    for item <- requests do
+      assert [[2]] =
+               Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [item.idempotency_key]).rows
+    end
+  end
+
   test "concurrent transfers serialize balance and ledger; insufficient funds does not debit" do
     sender = user_id()
     recipient = user_id()
