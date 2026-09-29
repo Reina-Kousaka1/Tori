@@ -96,12 +96,14 @@ class BotConfigTest {
         assertEquals(EconomyRouting.Source.LEGACY, legacy.source("balance"));
         assertEquals(EconomyRouting.Source.LEGACY, legacy.source("inventory"));
 
-        Files.writeString(directory.resolve(".env"), "TORI_ECONOMY_ROUTING=balance=ELIXIR,inventory=ELIXIR,leaderboard=ELIXIR\n");
+        Files.writeString(directory.resolve(".env"), "TORI_ECONOMY_ROUTING=balance=ELIXIR,inventory=ELIXIR,leaderboard=ELIXIR,daily=ELIXIR,transfer=ELIXIR\n");
         var routed = BotConfig.load(directory).economyRouting();
         assertEquals(EconomyRouting.Source.ELIXIR, routed.source("balance"));
         assertEquals(EconomyRouting.Source.ELIXIR, routed.source("inventory"));
         assertEquals(EconomyRouting.Source.LEGACY, routed.source("shop"));
         assertEquals(EconomyRouting.Source.ELIXIR, routed.source("leaderboard"));
+        assertEquals(EconomyRouting.Source.ELIXIR, routed.source("daily"));
+        assertEquals(EconomyRouting.Source.ELIXIR, routed.source("transfer"));
         assertTrue(routed.usesElixir());
     }
 

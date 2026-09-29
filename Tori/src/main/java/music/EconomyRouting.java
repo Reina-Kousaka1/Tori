@@ -6,11 +6,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.HashSet;
 
-/** Central opt-in routing for the Economy API's read paths. */
+/** Central opt-in routing for individually owned economy areas. */
 final class EconomyRouting {
     enum Source { LEGACY, ELIXIR }
 
-    private static final Set<String> AREAS = Set.of("balance", "inventory", "shop", "leaderboard");
+    private static final Set<String> AREAS = Set.of("balance", "inventory", "shop", "leaderboard", "daily", "transfer");
     private final Map<String, Source> sources;
 
     private EconomyRouting(Map<String, Source> sources) { this.sources = Map.copyOf(sources); }

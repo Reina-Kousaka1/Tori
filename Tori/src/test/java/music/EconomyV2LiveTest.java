@@ -29,10 +29,10 @@ class EconomyV2LiveTest {
         String user = snowflake();
         String rankingUser = snowflake();
         String productId = "api_test_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-        seed(databaseUrl, databaseUser, databasePassword, actor, user, rankingUser, productId);
         var client = new EconomyV2Client(HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2)).build(), URI.create(url), secret);
         try {
+            seed(databaseUrl, databaseUser, databasePassword, actor, user, rankingUser, productId);
             assertEquals(4821L, client.balance(actor, "234567890123456789",
                 "345678901234567890", user));
             var inventory = client.inventory(actor, "234567890123456789", "345678901234567890", user);
@@ -46,8 +46,38 @@ class EconomyV2LiveTest {
             assertTrue(product.available());
             var leaderboard = client.leaderboard(actor, "234567890123456789", "345678901234567890", 100);
             assertTrue(leaderboard.stream().anyMatch(entry -> entry.userId().equals(user) && entry.balance() == 4821L));
+
+            assumeTrue("YES".equals(System.getenv("TORI_ECONOMY_TEST_WRITE_ENABLED")),
+                "Set TORI_ECONOMY_TEST_WRITE_ENABLED=YES only when the live API is configured for tori_test writes");
+            String dailyInteraction = snowflake();
+            var daily = client.dailyClaim(dailyInteraction, actor, "234567890123456789",
+                "345678901234567890", null);
+            assertTrue(daily.succeeded(), "daily failed with " + daily.errorCode());
+            assertEquals(150, daily.credits());
+            assertEquals(150, daily.balance());
+            assertEquals(daily, client.dailyClaim(dailyInteraction, actor, "234567890123456789",
+                "345678901234567890", null), "lost-response retry must replay the stored daily result");
+            var cooldown = client.dailyClaim(snowflake(), actor, "234567890123456789",
+                "345678901234567890", null);
+            assertEquals("COOLDOWN_ACTIVE", cooldown.errorCode());
+
+            String transferInteraction = snowflake();
+            var transfer = client.transfer(transferInteraction, actor, "234567890123456789",
+                "345678901234567890", user, 25);
+            assertTrue(transfer.succeeded(), "transfer failed with " + transfer.errorCode());
+            assertEquals(125, transfer.balance());
+            assertEquals(transfer, client.transfer(transferInteraction, actor, "234567890123456789",
+                "345678901234567890", user, 25), "lost-response retry must replay the stored transfer result");
+            assertEquals(125, client.balance(actor, "234567890123456789", "345678901234567890", actor));
+            assertEquals(4846, client.balance(actor, "234567890123456789", "345678901234567890", user));
+            assertEquals("INSUFFICIENT_FUNDS", client.transfer(snowflake(), actor, "234567890123456789",
+                "345678901234567890", user, 10_000).errorCode());
+            assertEquals("INVALID_TARGET", client.transfer(snowflake(), actor, "234567890123456789",
+                "345678901234567890", actor, 1).errorCode());
+            assertEquals("INVALID_AMOUNT", client.transfer(snowflake(), actor, "234567890123456789",
+                "345678901234567890", user, 0).errorCode());
         } finally {
-            cleanup(databaseUrl, databaseUser, databasePassword, user, rankingUser, productId);
+            cleanup(databaseUrl, databaseUser, databasePassword, actor, user, rankingUser, productId);
         }
     }
 
@@ -60,6 +90,11 @@ class EconomyV2LiveTest {
                              String rankingUser, String product)
             throws Exception {
         try (var connection = DriverManager.getConnection(url, user, password)) {
+            try (var check = connection.createStatement(); var rows = check.executeQuery(
+                    "SELECT to_regclass('economy_v2_requests'), to_regclass('economy_v2_ledger_entries')")) {
+                if (!rows.next() || rows.getString(1) == null || rows.getString(2) == null)
+                    throw new IllegalStateException("The isolated tori_test database must have the draft V5 economy tables applied");
+            }
             try (var insert = connection.prepareStatement("INSERT INTO economy_accounts(user_id,balance) VALUES (?,0),(?,4821),(?,9223372036854775807)")) {
                 insert.setString(1, actor);
                 insert.setString(2, target);
@@ -82,10 +117,28 @@ class EconomyV2LiveTest {
         }
     }
 
-    private static void cleanup(String url, String user, String password, String owner,
+    private static void cleanup(String url, String user, String password, String actor, String owner,
                                 String rankingUser, String product)
             throws Exception {
         try (var connection = DriverManager.getConnection(url, user, password)) {
+            try (var check = connection.createStatement(); var rows = check.executeQuery(
+                    "SELECT to_regclass('economy_v2_requests'), to_regclass('economy_v2_ledger_entries')")) {
+                if (!rows.next() || rows.getString(1) == null || rows.getString(2) == null) return;
+            }
+            try (var delete = connection.prepareStatement("DELETE FROM economy_v2_ledger_entries WHERE user_id IN (?,?,?) OR counterparty_user_id IN (?,?,?)")) {
+                for (int index = 1; index <= 3; index++) {
+                    String id = index == 1 ? actor : index == 2 ? owner : rankingUser;
+                    delete.setString(index, id);
+                    delete.setString(index + 3, id);
+                }
+                delete.executeUpdate();
+            }
+            try (var delete = connection.prepareStatement("DELETE FROM economy_v2_requests WHERE actor_user_id IN (?,?,?)")) {
+                delete.setString(1, actor);
+                delete.setString(2, owner);
+                delete.setString(3, rankingUser);
+                delete.executeUpdate();
+            }
             try (var delete = connection.prepareStatement("DELETE FROM economy_inventory WHERE user_id=?")) {
                 delete.setString(1, owner);
                 delete.executeUpdate();
@@ -94,6 +147,8 @@ class EconomyV2LiveTest {
                 delete.setString(1, owner);
                 delete.executeUpdate();
                 delete.setString(1, rankingUser);
+                delete.executeUpdate();
+                delete.setString(1, actor);
                 delete.executeUpdate();
             }
             try (var delete = connection.prepareStatement("DELETE FROM economy_market_products WHERE product_id=?")) {

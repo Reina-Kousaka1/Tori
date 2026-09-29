@@ -1,5 +1,39 @@
 # Economy V2 readiness — 2026-09-29
 
+## Phase 2 + 3 implementation record — 2026-09-29
+
+`/daily` and the existing `/transfer` command now have opt-in Java routing via
+`TORI_ECONOMY_ROUTING=daily=ELIXIR,transfer=ELIXIR`; omitted areas stay
+`LEGACY`. The Elixir write gate remains read-only unless explicitly enabled,
+and permits writes only when its configured PostgreSQL URL names a `*_test`
+database. The API refuses startup if writes are enabled for any other database.
+Production routes and writes were not enabled.
+
+The mutation path reuses the draft V5 tables: `economy_accounts` remains the
+global wallet source, while `economy_v2_requests` stores interaction-keyed
+results and `economy_v2_ledger_entries` stores `DAILY_CLAIM`, `TRANSFER_OUT`,
+and `TRANSFER_IN`. Balance updates, ledger legs, and replay result commit in
+one transaction. Transfers lock both account rows in a stable sorted order.
+No schema was added to Flyway and no database was contacted during this work.
+
+Current verification for this implementation:
+
+| Gate | Result | Evidence / limit |
+| --- | --- | --- |
+| Java clean test/build | PASS | `gradlew clean test build --no-daemon`: 250 tests, 0 failures, 0 errors, 6 optional live tests skipped. |
+| Elixir format/compile/test | BLOCKED / NOT RUN | `mix test` could not start because `mix` is not installed in this environment. |
+| Java → Elixir → PostgreSQL mutation integration | NOT RUN | Opt-in live test added; no Elixir runtime or isolated PostgreSQL endpoint available. |
+| Daily/transfer restart replay | NOT RUN | Test added; requires the isolated PostgreSQL integration environment. |
+| Parallel/race tests | NOT RUN | Tests added for identical requests, concurrent transfers, and opposing lock order; not executed. |
+| Mid-transaction rollback | NOT RUN | Trigger-based isolated PostgreSQL test added; not executed. |
+| Production database contacted | NO | No production URL was used. |
+| Production Elixir writes enabled | NO | Default remains `READ_ONLY`; no production cutover. |
+
+The Phase 1 verification table below is historical evidence from its earlier
+run and does not imply that the new Phase 2/3 Elixir tests passed. Do not push
+or enable Elixir writes until the blocked Elixir and isolated database tests
+have been run successfully.
+
 This is a code and schema audit, not a production-data count. The Java bot still
 routes all economy commands to `PostgresCurrencyStore` and `PostgresMarketStore`.
 `/balance` can be routed through the Java `EconomyV2Client` to Elixir by an

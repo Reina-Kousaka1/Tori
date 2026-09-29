@@ -86,6 +86,10 @@ public final class EconomyV2Client {
         public ShopCatalog { products = List.copyOf(products); sales = List.copyOf(sales); }
     }
     public record LeaderboardEntry(String userId, long balance) {}
+    public record MutationResult(String errorCode, String targetUserId, long credits, long balance,
+                                 long retryAfterMillis) {
+        public boolean succeeded() { return errorCode == null; }
+    }
 
     public Response execute(Request request) throws IOException, InterruptedException {
         Map<String, Object> payload = new java.util.LinkedHashMap<>();
@@ -103,7 +107,7 @@ public final class EconomyV2Client {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(bytes))
                 .build();
         HttpResponse<String> response = http.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() != 200 && response.statusCode() != 400 &&
+        if (response.statusCode() != 200 && response.statusCode() != 400 && response.statusCode() != 500 &&
                 response.statusCode() != 401 && response.statusCode() != 403 && response.statusCode() != 409 &&
                 response.statusCode() != 503) {
             throw new IOException("Unexpected economy HTTP status: " + response.statusCode());
@@ -179,14 +183,74 @@ public final class EconomyV2Client {
         return List.copyOf(result);
     }
 
+    public MutationResult dailyClaim(String interactionId, String actorId, String guildId, String channelId,
+                                     String targetId) throws IOException, InterruptedException {
+        var context = mutationContext(actorId, guildId, channelId, targetId);
+        Request request = Request.mutation(interactionId, "daily.claim", context, Map.of());
+        JsonNode body = mutationResponse(request);
+        if ("error".equals(body.path("status").asText())) return mutationError(body);
+        JsonNode result = body.path("result");
+        if (!"daily_claimed".equals(result.path("type").asText()) ||
+                !Objects.equals(targetId == null ? actorId : targetId, result.path("recipient_user_id").asText()))
+            throw new IOException("Invalid economy daily response");
+        return new MutationResult(null, result.path("recipient_user_id").asText(),
+                decimal(result.path("credits_awarded"), "credits_awarded"),
+                decimal(result.path("balance"), "balance"), 0);
+    }
+
+    public MutationResult transfer(String interactionId, String actorId, String guildId, String channelId,
+                                   String recipientId, long amount) throws IOException, InterruptedException {
+        var context = mutationContext(actorId, guildId, channelId, null);
+        Request request = Request.mutation(interactionId, "wallet.transfer", context,
+                Map.of("recipient_user_id", recipientId, "amount", Long.toString(amount)));
+        JsonNode body = mutationResponse(request);
+        if ("error".equals(body.path("status").asText())) return mutationError(body);
+        JsonNode result = body.path("result");
+        if (!"wallet_transfer".equals(result.path("type").asText()) ||
+                !recipientId.equals(result.path("recipient_user_id").asText()) ||
+                amount != decimal(result.path("amount"), "amount"))
+            throw new IOException("Invalid economy transfer response");
+        return new MutationResult(null, recipientId, amount,
+                decimal(result.path("balance"), "balance"), 0);
+    }
+
+    private JsonNode mutationResponse(Request request) throws IOException, InterruptedException {
+        Response response = execute(request);
+        JsonNode body = response.body();
+        if ("ok".equals(body.path("status").asText()) && response.httpStatus() == 200 &&
+                request.requestId().equals(body.path("request_id").asText()) && body.path("result").isObject())
+            return body;
+        if ("error".equals(body.path("status").asText()) && body.path("error").path("code").isTextual())
+            return body;
+        throw new IOException("Invalid economy mutation response");
+    }
+
+    private static MutationResult mutationError(JsonNode body) throws IOException {
+        JsonNode error = body.path("error");
+        String code = text(error, "code");
+        if (!java.util.Set.of("READ_ONLY", "INSUFFICIENT_FUNDS", "COOLDOWN_ACTIVE", "INVALID_AMOUNT",
+                "INVALID_TARGET", "INVALID_INPUT", "SERVICE_UNAVAILABLE", "INTERNAL_ERROR",
+                "IDEMPOTENCY_CONFLICT").contains(code))
+            throw new IOException("Unknown economy error response");
+        JsonNode retry = error.path("details").path("retry_after_ms");
+        long retryAfter = retry.isIntegralNumber() && retry.canConvertToLong() ? retry.longValue() : 0;
+        return new MutationResult(code, null, 0, 0, retryAfter);
+    }
+
     private Request readRequest(String operation, String actorId, String guildId, String channelId,
                                 String targetId, Map<String, Object> args) {
+        var context = mutationContext(actorId, guildId, channelId, targetId);
+        return new Request(UUID.randomUUID().toString(), null, operation, context, args);
+    }
+
+    private static Map<String, String> mutationContext(String actorId, String guildId, String channelId,
+                                                       String targetId) {
         var context = new java.util.LinkedHashMap<String, String>();
         context.put("actor_user_id", actorId);
         context.put("guild_id", guildId);
         context.put("channel_id", channelId);
         if (targetId != null) context.put("target_user_id", targetId);
-        return new Request(UUID.randomUUID().toString(), null, operation, context, args);
+        return Map.copyOf(context);
     }
 
     private JsonNode readResult(Request request, String type, String expectedUserId)

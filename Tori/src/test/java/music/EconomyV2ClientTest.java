@@ -143,6 +143,47 @@ class EconomyV2ClientTest {
     }
 
     @Test
+    void dailyAndTransferMutationsUseInteractionIdsAndMapReadOnlyErrors() throws Exception {
+        var captured = new ArrayList<JsonNode>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/economy/v1/execute", exchange -> {
+            try (exchange) {
+                JsonNode request = JSON.readTree(exchange.getRequestBody());
+                captured.add(request);
+                boolean readOnly = "daily.claim".equals(request.path("operation").asText());
+                Map<String, Object> response = readOnly
+                    ? Map.of("request_id", "", "status", "error", "error", Map.of("code", "READ_ONLY", "retryable", false))
+                    : Map.of("request_id", request.path("request_id").asText(), "status", "ok", "result",
+                        Map.of("type", "wallet_transfer", "recipient_user_id", "456789012345678901",
+                            "amount", "25", "balance", "125"));
+                byte[] bytes = JSON.writeValueAsBytes(response);
+                exchange.sendResponseHeaders(readOnly ? 403 : 200, bytes.length);
+                exchange.getResponseBody().write(bytes);
+            }
+        });
+        server.start();
+        try {
+            var client = new EconomyV2Client(HttpClient.newHttpClient(),
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort()), SECRET);
+            var daily = client.dailyClaim("123456789012345678", "223456789012345678",
+                "234567890123456789", "345678901234567890", null);
+            assertEquals("READ_ONLY", daily.errorCode());
+            var transfer = client.transfer("123456789012345679", "223456789012345678",
+                "234567890123456789", "345678901234567890", "456789012345678901", 25);
+            assertTrue(transfer.succeeded());
+            assertEquals(125, transfer.balance());
+            assertEquals(2, captured.size());
+            assertEquals("daily.claim", captured.getFirst().path("operation").asText());
+            assertEquals("discord-interaction:123456789012345678",
+                captured.getFirst().path("idempotency_key").asText());
+            assertEquals("wallet.transfer", captured.getLast().path("operation").asText());
+            assertEquals("25", captured.getLast().path("args").path("amount").asText());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void unavailableServiceAndMalformedResponseFailClosed() throws Exception {
         int unusedPort;
         try (var socket = new ServerSocket(0)) { unusedPort = socket.getLocalPort(); }

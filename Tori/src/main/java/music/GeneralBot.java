@@ -272,9 +272,19 @@ public final class GeneralBot extends CommandListener {
                 case "daily" -> {
                     var selected = event.getOption("user");
                     var user = selected == null ? event.getUser() : selected.getAsUser();
-                    long wait = currency.daily(user.getId(), clock.millis());
-                    String result = wait == 0 ? Messages.text(language, "economy.daily.claimed", 150, currency.balance(user.getId()))
-                        : Messages.text(language, "economy.daily.cooldown", Math.max(1, (wait + 59_999) / 60_000));
+                    String result;
+                    if (economyRouting.source("daily") == EconomyRouting.Source.ELIXIR) {
+                        require(economyV2Balance != null, "economy.unavailable");
+                        var claim = economyRead(() -> economyV2Balance.dailyClaim(event.getId(), userId,
+                            event.getGuild().getId(), event.getChannel().getId(),
+                            user.getId().equals(userId) ? null : user.getId()));
+                        if (!claim.succeeded()) throw economyFailure(claim.errorCode(), claim.retryAfterMillis());
+                        result = Messages.text(language, "economy.daily.claimed", claim.credits(), claim.balance());
+                    } else {
+                        long wait = currency.daily(user.getId(), clock.millis());
+                        result = wait == 0 ? Messages.text(language, "economy.daily.claimed", 150, currency.balance(user.getId()))
+                            : Messages.text(language, "economy.daily.cooldown", Math.max(1, (wait + 59_999) / 60_000));
+                    }
                     yield persona.decorate(result, ToriPersona.Context.SOCIAL_FUN, language);
                 }
                 case "beg" -> begText(event, language, userId);
@@ -452,8 +462,28 @@ public final class GeneralBot extends CommandListener {
         var recipient = selected.getAsUser();
         var amount = event.getOption("amount");
         require(amount != null && amount.getAsLong() > 0 && amount.getAsLong() <= MAX_DISCORD_INTEGER, "currency.amount");
+        if (economyRouting.source("transfer") == EconomyRouting.Source.ELIXIR) {
+            require(economyV2Balance != null, "economy.unavailable");
+            var transfer = economyRead(() -> economyV2Balance.transfer(event.getId(), userId,
+                event.getGuild().getId(), event.getChannel().getId(), recipient.getId(), amount.getAsLong()));
+            if (!transfer.succeeded()) throw economyFailure(transfer.errorCode(), transfer.retryAfterMillis());
+            return Messages.text(language, "currency.transfer.result", amount.getAsLong(), recipient.getAsMention());
+        }
         require(currency.transfer(userId, recipient.getId(), amount.getAsLong()), "currency.transfer.failed");
         return Messages.text(language, "currency.transfer.result", amount.getAsLong(), recipient.getAsMention());
+    }
+
+    private static UserError economyFailure(String code, long retryAfterMillis) {
+        return switch (code) {
+            case "COOLDOWN_ACTIVE" -> new UserError("economy.daily.cooldown",
+                Math.max(1, (retryAfterMillis + 59_999) / 60_000));
+            case "INVALID_AMOUNT" -> new UserError("currency.amount");
+            case "INVALID_TARGET", "INSUFFICIENT_FUNDS" -> new UserError("currency.transfer.failed");
+            case "READ_ONLY" -> new UserError("economy.write.read_only");
+            case "INVALID_INPUT" -> new UserError("error.input");
+            case "SERVICE_UNAVAILABLE", "INTERNAL_ERROR", "TEMPORARILY_UNAVAILABLE" -> new UserError("economy.unavailable");
+            default -> new UserError("economy.unavailable");
+        };
     }
 
     private String wagerText(CommandContext event, Language language, String userId) throws CurrencyStoreException {
