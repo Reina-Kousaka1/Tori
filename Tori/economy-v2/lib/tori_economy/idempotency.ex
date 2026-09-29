@@ -2,10 +2,13 @@ defmodule ToriEconomy.Idempotency do
   @moduledoc "Stores a completed command result in the same transaction as every effect."
   alias ToriEconomy.{Repo, Sql}
 
-  def run(request, fun) when is_function(fun, 0) do
+  def run(request, fun, opts \\ []) when is_function(fun, 0) do
     try do
-      case Repo.transaction(fn -> run_in_transaction(request, fun) end) do
+      case Repo.transaction(fn -> run_in_transaction(request, fun, opts) end) do
         {:ok, result} -> {:ok, Map.put(result, "request_id", request.request_id)}
+        {:error, {:unpersisted_result, result}} ->
+          {:ok, Map.put(result, "request_id", request.request_id)}
+
         {:error, _} -> {:error, "SERVICE_UNAVAILABLE"}
       end
     rescue
@@ -15,7 +18,7 @@ defmodule ToriEconomy.Idempotency do
     end
   end
 
-  defp run_in_transaction(request, fun) do
+  defp run_in_transaction(request, fun, opts) do
     context = request.context
 
     inserted =
@@ -56,14 +59,18 @@ defmodule ToriEconomy.Idempotency do
     else
       result = fun.()
 
-      Sql.query!(
-        """
-        UPDATE economy_v2_requests SET result_json = $2 WHERE idempotency_key = $1
-        """,
-        [request.idempotency_key, result]
-      )
+      if get_in(result, ["error", "code"]) in Keyword.get(opts, :skip_persist_errors, []) do
+        Repo.rollback({:unpersisted_result, result})
+      else
+        Sql.query!(
+          """
+          UPDATE economy_v2_requests SET result_json = $2 WHERE idempotency_key = $1
+          """,
+          [request.idempotency_key, result]
+        )
 
-      result
+        result
+      end
     end
   end
 end

@@ -10,6 +10,61 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Destructive operations are confined to one random account in an explicitly named tori_test database. */
 class PostgresCurrencyStoreLiveTest {
+    @Test void dailyCooldownIsExactlyTwentyFourElapsedHoursAndDoesNotWriteWhenBlocked() throws Exception {
+        assumeTrue("YES".equals(System.getenv("TORI_POSTGRES_LIVE_TEST")));
+        String url = System.getenv("TORI_TEST_DATABASE_URL");
+        String user = System.getenv("TORI_TEST_DATABASE_USER");
+        String password = System.getenv("TORI_TEST_DATABASE_PASSWORD");
+        if (url == null || !url.matches("jdbc:postgresql://[^?]+/tori_test(?:\\?.*)?")
+            || user == null || password == null)
+            throw new IllegalStateException("Live economy test requires credentials for a dedicated tori_test database.");
+
+        String userId = Long.toUnsignedString(java.util.concurrent.ThreadLocalRandom.current().nextLong());
+        boolean ownsAccount = false;
+        try {
+            try (var database = new PostgresDatabase(url, user, password)) {
+                try (var connection = database.connection(); var query = connection.prepareStatement(
+                    "SELECT 1 FROM economy_accounts WHERE user_id=?")) {
+                    query.setString(1, userId);
+                    try (var rows = query.executeQuery()) {
+                        if (rows.next()) throw new IllegalStateException("Random test account collision; refusing to touch existing data.");
+                    }
+                }
+                ownsAccount = true;
+                var store = new PostgresCurrencyStore(database);
+                long claim = 1_000_000L;
+                assertEquals(0, store.daily(userId, claim));
+                var afterClaim = dailyState(database, userId);
+                assertEquals(150, afterClaim.balance());
+                assertEquals(claim, afterClaim.lastClaim());
+
+                assertEquals(DailyCooldown.DURATION_MILLIS - 1, store.daily(userId, claim + 1));
+                assertEquals(1, store.daily(userId, claim + DailyCooldown.DURATION_MILLIS - 1));
+                assertEquals(afterClaim, dailyState(database, userId), "blocked claims must not change wallet, cooldown, or updated_at");
+
+                assertEquals(0, store.daily(userId, claim + DailyCooldown.DURATION_MILLIS));
+                var nextClaim = dailyState(database, userId);
+                assertEquals(300, nextClaim.balance());
+                assertEquals(claim + DailyCooldown.DURATION_MILLIS, nextClaim.lastClaim());
+            }
+        } finally {
+            if (ownsAccount) cleanup(url, user, password, userId);
+        }
+    }
+
+    private static DailyState dailyState(PostgresDatabase database, String userId) throws Exception {
+        try (var connection = database.connection(); var query = connection.prepareStatement(
+            "SELECT balance,last_daily_at,updated_at::text FROM economy_accounts WHERE user_id=?")) {
+            query.setString(1, userId);
+            try (var rows = query.executeQuery()) {
+                assertTrue(rows.next());
+                return new DailyState(rows.getLong(1), rows.getLong(2), rows.getString(3));
+            }
+        }
+    }
+
+    private record DailyState(long balance, long lastClaim, String updatedAt) {}
+
     @Test void economyTransactionsAndStateSurviveAStoreRestart() throws Exception {
         assumeTrue("YES".equals(System.getenv("TORI_POSTGRES_LIVE_TEST")));
         String url = System.getenv("TORI_TEST_DATABASE_URL");
