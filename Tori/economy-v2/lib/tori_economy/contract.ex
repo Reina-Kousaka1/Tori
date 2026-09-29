@@ -6,10 +6,13 @@ defmodule ToriEconomy.Contract do
   @max_amount 9_223_372_036_854_775_807
   @mutations ["daily.claim", "wallet.transfer", "shop.purchase", "inventory.equip",
               "inventory.unequip", "progression.grant", "marketplace.list",
-              "marketplace.buy", "marketplace.cancel", "activity.perform", "inventory.consume"]
+              "marketplace.buy", "marketplace.cancel", "activity.perform", "inventory.consume",
+              "inventory.cosmetic.select", "inventory.cosmetic.clear", "career.select",
+              "career.practice"]
   @reads ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard", "profile.snapshot",
           "market.product", "market.history", "shop.rotation", "progression.snapshot",
-          "marketplace.browse", "inventory.effects"]
+          "marketplace.browse", "inventory.effects", "shop.item", "inventory.cosmetics",
+          "career.snapshot", "inventory.item", "wardrobe.list", "marketplace.inspect"]
   @operations @mutations ++ @reads
 
   def validate(raw) when is_map(raw) do
@@ -45,19 +48,100 @@ defmodule ToriEconomy.Contract do
 
   defp validate_args("wallet.balance", args), do: keys(args, [])
   defp validate_args("daily.claim", args), do: keys(args, [])
-  defp validate_args("inventory.list", args), do: keys(args, [])
+  defp validate_args(operation, args) when operation in ["inventory.list", "wardrobe.list"] do
+    with :ok <- keys(args, ["category", "page"]),
+         category when is_binary(category) <- Map.get(args, "category", "all"),
+         true <- category == "all" or Regex.match?(~r/^[a-z0-9_-]{1,64}$/, category),
+         page when is_integer(page) and page in 0..1000 <- Map.get(args, "page", 0), do: :ok
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
+  defp validate_args("inventory.item", args) do
+    with :ok <- keys(args, ["item_id"]), :ok <- item_id(args["item_id"]), do: :ok
+  end
   defp validate_args("profile.snapshot", args), do: keys(args, [])
-  defp validate_args("shop.rotation", args), do: keys(args, [])
+  defp validate_args("shop.rotation", args) do
+    with :ok <- keys(args, ["category", "page"]),
+         category when is_binary(category) <- Map.get(args, "category", "all"),
+         true <- category == "all" or Regex.match?(~r/^[a-z0-9_-]{1,64}$/, category),
+         page when is_integer(page) and page >= 0 and page <= 1000 <- Map.get(args, "page", 0) do
+      :ok
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
+  defp validate_args("shop.item", args) do
+    with :ok <- keys(args, ["item_id", "period_key"]),
+         :ok <- item_id(args["item_id"]),
+         key when is_binary(key) <- args["period_key"],
+         true <- Regex.match?(~r/^[0-9]{1,15}$/, key) do
+      :ok
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
+  defp validate_args("inventory.cosmetics", args), do: keys(args, [])
+  defp validate_args("career.snapshot", args), do: keys(args, [])
+  defp validate_args("career.select", args) do
+    with :ok <- keys(args, ["career_code"]),
+         career when career in ["ballet", "volleyball", "cheer"] <- args["career_code"] do
+      :ok
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
+  defp validate_args("career.practice", args) do
+    with :ok <- keys(args, ["career_code", "action_code"]),
+         career when career in ["ballet", "volleyball", "cheer"] <- args["career_code"],
+         action when action in ["practice"] <- args["action_code"] do
+      :ok
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
+  defp validate_args("inventory.cosmetic.select", args) do
+    with :ok <- keys(args, ["item_id", "slot"]),
+         :ok <- item_id(args["item_id"]),
+         slot when slot in ["nails", "makeup", "hair_accessory"] <- args["slot"] do
+      :ok
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
+  defp validate_args("inventory.cosmetic.clear", args) do
+    with :ok <- keys(args, ["slot"]),
+         slot when slot in ["nails", "makeup", "hair_accessory"] <- args["slot"] do
+      :ok
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
   defp validate_args("progression.snapshot", args), do: keys(args, [])
-  defp validate_args("marketplace.browse", args), do: keys(args, [])
+  defp validate_args("marketplace.browse", args) do
+    with :ok <- keys(args, ["category", "page"]),
+         category when is_binary(category) <- Map.get(args, "category", "all"),
+         true <- category == "all" or Regex.match?(~r/^[a-z0-9_-]{1,64}$/, category),
+         page when is_integer(page) and page in 0..1000 <- Map.get(args, "page", 0) do
+      :ok
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
+  defp validate_args("marketplace.inspect", args) do
+    with :ok <- keys(args, ["listing_id"]), :ok <- item_id(args["listing_id"]), do: :ok
+  end
   defp validate_args("inventory.effects", args), do: keys(args, [])
   defp validate_args("inventory.consume", args) do
     with :ok <- keys(args, ["item_id"]), :ok <- item_id(args["item_id"]), do: :ok
   end
   defp validate_args("activity.perform", args) do
     with :ok <- keys(args, ["activity"]),
-         activity when activity in ["fish", "mine", "chop"] <- args["activity"], do: :ok
-    else _ -> {:error, "INVALID_INPUT"} end
+         activity when activity in ["fish", "mine", "chop"] <- args["activity"] do
+      :ok
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
   end
 
   defp validate_args("shop.purchase", args) do
@@ -76,13 +160,17 @@ defmodule ToriEconomy.Contract do
     with :ok <- keys(args, ["item_id", "slot"]), :ok <- item_id(args["item_id"]),
          slot when slot in ~w(top bottom dress outerwear shoes bag accessory jewelry hair_accessory) <- args["slot"] do
       :ok
-    else _ -> {:error, "INVALID_INPUT"} end
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
   end
   defp validate_args("inventory.unequip", args) do
     with :ok <- keys(args, ["slot"]),
          slot when slot in ~w(top bottom dress outerwear shoes bag accessory jewelry hair_accessory) <- args["slot"] do
       :ok
-    else _ -> {:error, "INVALID_INPUT"} end
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
   end
   defp validate_args("progression.grant", args) do
     with :ok <- keys(args, ["source_code"]), :ok <- item_id(args["source_code"]), do: :ok
@@ -95,7 +183,9 @@ defmodule ToriEconomy.Contract do
          true <- Regex.match?(~r/^[1-9][0-9]{0,17}$/, price),
          hours when is_integer(hours) and hours in 1..168 <- args["expires_hours"] do
       :ok
-    else _ -> {:error, "INVALID_INPUT"} end
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
   end
   defp validate_args(operation, args) when operation in ["marketplace.buy", "marketplace.cancel"] do
     with :ok <- keys(args, ["listing_id"]), :ok <- item_id(args["listing_id"]), do: :ok

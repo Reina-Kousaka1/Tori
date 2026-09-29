@@ -138,12 +138,21 @@ defmodule ToriEconomy.Api do
     failure ->
       # No exception message, SQL text, request body or credential in logs.
       Logger.error("Economy request failed (#{inspect(failure.__struct__)})")
+      try do
+        Mood.record(:system_failure)
+      catch
+        :exit, _ -> :ok
+      end
       reply(conn, 500, error(nil, "INTERNAL_ERROR", false))
   end
 
   # A running API is not permission to create a second wallet writer.
   defp writes_allowed(%{operation: operation})
-       when operation in ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard", "profile.snapshot", "market.product", "market.history", "shop.rotation", "progression.snapshot", "marketplace.browse", "inventory.effects"],
+       when operation in ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard",
+                          "profile.snapshot", "market.product", "market.history", "shop.rotation",
+                          "shop.item", "progression.snapshot", "career.snapshot",
+                          "marketplace.browse", "inventory.effects", "inventory.cosmetics",
+                          "inventory.item", "wardrobe.list"],
        do: :ok
 
   defp writes_allowed(request) do

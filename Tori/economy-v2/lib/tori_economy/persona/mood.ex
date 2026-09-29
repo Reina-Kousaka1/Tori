@@ -4,17 +4,19 @@ defmodule ToriEconomy.Persona.Mood do
 
   @moods ~w(normal happy excited playful competitive focused sleepy annoyed chaotic)a
   @events %{
-    rare_drop: {:excited, 0.75, 3_600_000},
-    successful_activity: {:happy, 0.45, 1_800_000},
-    ballet_practice: {:focused, 0.5, 3_600_000},
-    volleyball_match: {:competitive, 0.65, 3_600_000},
-    cheer_event: {:playful, 0.5, 2_700_000},
-    late_night: {:sleepy, 0.35, 1_800_000},
-    system_failure: {:annoyed, 0.2, 900_000},
-    celebration: {:chaotic, 0.55, 1_800_000}
+    rare_drop: {:excited, 0.75, 3_600_000, 900_000},
+    successful_activity: {:happy, 0.45, 1_800_000, 300_000},
+    level_up: {:excited, 0.8, 3_600_000, 3_600_000},
+    ballet_practice: {:focused, 0.5, 3_600_000, 900_000},
+    volleyball_match: {:competitive, 0.65, 3_600_000, 900_000},
+    cheer_event: {:playful, 0.5, 2_700_000, 900_000},
+    late_night: {:sleepy, 0.35, 1_800_000, 900_000},
+    system_failure: {:annoyed, 0.2, 900_000, 900_000},
+    celebration: {:chaotic, 0.55, 1_800_000, 1_800_000}
   }
 
-  defstruct mood: :normal, intensity: 0.0, started_at_ms: 0, expires_at_ms: nil, reason: :initial
+  defstruct mood: :normal, intensity: 0.0, started_at_ms: 0, expires_at_ms: nil,
+            reason: :initial, recent_events: %{}
 
   def start_link(opts) do
     name = Keyword.get(opts, :name, __MODULE__)
@@ -43,7 +45,7 @@ defmodule ToriEconomy.Persona.Mood do
 
   def resolve(%__MODULE__{} = state, now_ms) when is_integer(now_ms) do
     if state.expires_at_ms && now_ms >= state.expires_at_ms do
-      new(now_ms)
+      %{new(now_ms) | recent_events: state.recent_events}
     else
       remaining =
         if state.expires_at_ms do
@@ -59,9 +61,17 @@ defmodule ToriEconomy.Persona.Mood do
 
   def transition(%__MODULE__{} = state, event, now_ms) when is_integer(now_ms) do
     case Map.fetch(@events, event) do
-      {:ok, {mood, intensity, duration}} ->
+      {:ok, {mood, intensity, duration, cooldown}} ->
+        state = resolve(state, now_ms)
+        last_event_at = Map.get(state.recent_events, event)
+
+        if is_integer(last_event_at) and now_ms - last_event_at < cooldown do
+          state
+        else
         %__MODULE__{mood: mood, intensity: intensity, started_at_ms: now_ms,
-                    expires_at_ms: now_ms + duration, reason: event}
+                    expires_at_ms: now_ms + duration, reason: event,
+                    recent_events: Map.put(state.recent_events, event, now_ms)}
+        end
 
       :error -> state
     end

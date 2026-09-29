@@ -15,6 +15,44 @@ defmodule ToriEconomy.Persona do
       excited: "That %{item_name} is yours! %{amount} Credits spent ✨"
     },
     "shop.purchase.insufficient_funds" => %{neutral: "You need more Credits for %{item_name}."},
+    "shop.rotation.ready" => %{
+      neutral: "The %{theme} drop is live for %{minutes} more minutes.",
+      excited: "A fresh %{theme} drop is here ✨ It refreshes in %{minutes} minutes.",
+      christmas: "A little winter shop update is here ✨ %{minutes} minutes remain."
+    },
+    "shop.item.rare" => %{
+      neutral: "%{item_name} is a %{rarity} item and costs %{amount} Credits.",
+      excited: "A rare find: %{item_name} ✨ It costs %{amount} Credits."
+    },
+    "wardrobe.equip.success" => %{
+      neutral: "Equipped %{item_name} in your %{slot} slot.",
+      playful: "%{item_name} is in your %{slot} look now 🎀"
+    },
+    "wardrobe.cosmetic.success" => %{
+      neutral: "Selected %{item_name} for your %{slot} style.",
+      happy: "%{item_name} is your new %{slot} style ✨"
+    },
+    "career.select.success" => %{
+      neutral: "Selected %{career}. Your existing progress is saved.",
+      excited: "%{career} is your focus now ✨ Your earlier progress stays saved."
+    },
+    "career.practice.success" => %{
+      neutral: "%{career} practice complete: +%{amount} XP.",
+      focused: "Practice logged. %{career} +%{amount} XP.",
+      excited: "That practice counted ✨ %{career} +%{amount} XP."
+    },
+    "career.practice.cooldown" => %{neutral: "You can practice again in %{cooldown}."},
+    "progression.level_up" => %{
+      neutral: "You reached level %{level}.",
+      excited: "Level %{level} unlocked ✨"
+    },
+    "marketplace.list.success" => %{neutral: "Listed %{item_name} ×%{quantity} for %{amount} Credits."},
+    "marketplace.cancel.success" => %{neutral: "The listing was cancelled and the item returned to your inventory."},
+    "consumable.use.success" => %{neutral: "Used %{item_name}. The configured effect is active until %{expires_at}."},
+    "activity.fish.success" => %{neutral: "You caught %{item_name} and earned %{amount} Credits."},
+    "activity.mine.success" => %{neutral: "You found %{item_name} and earned %{amount} Credits."},
+    "activity.chop.success" => %{neutral: "You gathered %{item_name} and earned %{amount} Credits."},
+    "profile.progress" => %{neutral: "Level %{level} · %{xp} XP"},
     "marketplace.purchase.success" => %{
       neutral: "Purchased %{item_name} from the marketplace for %{amount} Credits.",
       happy: "%{item_name} found a new home! %{amount} Credits spent ✨"

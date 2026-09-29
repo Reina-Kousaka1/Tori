@@ -1,12 +1,53 @@
 defmodule ToriEconomy.Shop do
-  @moduledoc "A gated, idempotent purchase path using the global wallet and inventory."
+  @moduledoc "Persisted shop drops, user-facing catalog state and atomic purchases."
   alias ToriEconomy.{Catalog, Idempotency, Inventory, Sql}
   alias ToriEconomy.Shop.Rotation
 
+  @page_size 10
+
   def execute(%{operation: "shop.rotation"} = request) do
     case Rotation.current() do
-      {:ok, result} -> {:ok, %{"request_id" => request.request_id, "status" => "ok", "result" => result}}
+      {:ok, rotation} ->
+        user = request.context["actor_user_id"]
+        items = annotate_items(rotation["items"], user)
+        category = Map.get(request.args, "category", "all")
+        visible = Enum.filter(items, &(category == "all" or &1["category"] == category))
+        total = length(visible)
+        pages = max(1, div(total + @page_size - 1, @page_size))
+        page = min(Map.get(request.args, "page", 0), pages - 1)
+        selected = Enum.slice(visible, page * @page_size, @page_size)
+        [[now_epoch]] = Sql.query!("SELECT floor(extract(epoch from now())::numeric)::bigint").rows
+        result = rotation
+          |> Map.put("items", selected)
+          |> Map.put("rare_drop", Enum.count(items, &(&1["rarity"] in ["rare", "special"])) >= 3)
+          |> Map.put("category", category)
+          |> Map.put("page", page)
+          |> Map.put("page_size", @page_size)
+          |> Map.put("total_items", total)
+          |> Map.put("total_pages", pages)
+          |> Map.put("presentation_key", "shop.rotation.ready")
+          |> Map.put("refresh_in_seconds", max(0, String.to_integer(rotation["ends_at_epoch"]) - now_epoch))
+        {:ok, %{"request_id" => request.request_id, "status" => "ok", "result" => result}}
       error -> error
+    end
+  end
+
+  def execute(%{operation: "shop.item"} = request) do
+    user = request.context["actor_user_id"]
+    requested_period = request.args["period_key"]
+
+    with {:ok, rotation} <- Rotation.current(),
+         true <- rotation["period_key"] == requested_period || {:error, "ITEM_NOT_AVAILABLE"},
+         item when not is_nil(item) <- Enum.find(rotation["items"], &(&1["item_id"] == request.args["item_id"])) do
+      [item] = annotate_items([item], user)
+      detail = item |> Map.put("type", "shop_item") |> Map.put("period_key", rotation["period_key"])
+      detail = if item["rarity"] in ["rare", "special"],
+        do: Map.put(detail, "presentation_key", "shop.item.rare"), else: detail
+      {:ok, %{"request_id" => request.request_id, "status" => "ok", "result" => detail}}
+    else
+      {:error, code} -> {:error, code}
+      nil -> {:error, "ITEM_NOT_AVAILABLE"}
+      false -> {:error, "ITEM_NOT_AVAILABLE"}
     end
   end
 
@@ -17,13 +58,60 @@ defmodule ToriEconomy.Shop do
                             "REQUIREMENT_NOT_MET"])
   end
 
+  defp annotate_items(items, user) do
+    ids = Enum.map(items, & &1["item_id"])
+    owned = case ids do
+      [] -> %{}
+      _ ->
+        Sql.query!("SELECT item_id,quantity FROM economy_inventory WHERE user_id=$1 AND item_id=ANY($2::text[])",
+          [user, ids]).rows
+        |> Map.new(fn [id, quantity] -> {id, quantity} end)
+    end
+    level = case Sql.query!("""
+      SELECT coalesce(max(level),1) FROM economy_v2_xp_thresholds
+      WHERE required_xp<=coalesce((SELECT xp FROM economy_v2_account_progress WHERE user_id=$1),0)
+    """, [user]).rows do
+      [[value]] -> value
+    end
+    career_levels = Sql.query!("""
+      SELECT p.career_code,coalesce(max(t.level),1)
+      FROM economy_v2_career_progress p
+      LEFT JOIN economy_v2_xp_thresholds t ON t.required_xp<=coalesce(p.xp,0)
+      WHERE p.user_id=$1 GROUP BY p.career_code
+    """, [user]).rows
+    |> Map.new(fn [code, career_level] -> {code, career_level} end)
+
+    Enum.map(items, fn item ->
+      quantity = Map.get(owned, item["item_id"], 0)
+      remaining = item["remaining"]
+      available = is_nil(remaining) or String.to_integer(remaining) > 0
+      career_ok = is_nil(item["career_requirement"]) or
+        Map.get(career_levels, item["career_requirement"], 1) >= item["career_level_requirement"]
+      eligible = level >= item["level_requirement"] and career_ok
+      state = cond do
+        not available -> "sold"
+        not eligible -> "locked"
+        quantity > 0 -> "owned"
+        true -> "available"
+      end
+      item
+      |> Map.put("owned_quantity", Integer.to_string(quantity))
+      |> Map.put("player_level", level)
+      |> Map.put("eligible", eligible)
+      |> Map.put("career_requirement", item["career_requirement"])
+      |> Map.put("career_level_requirement", item["career_level_requirement"])
+      |> Map.put("available", available)
+      |> Map.put("state", state)
+    end)
+  end
+
   defp purchase(request) do
     user_id = request.context["actor_user_id"]
     item_id = request.args["item_id"]
     amount = request.args["quantity"]
     period_key = String.to_integer(request.args["period_key"])
 
-    # Serialize all wallet/inventory mutations for this user, including other V2 operations.
+    # Serialize wallet and inventory mutations on the global account row.
     Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1) ON CONFLICT DO NOTHING", [user_id])
     [[balance]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1 FOR UPDATE", [user_id]).rows
 
@@ -47,6 +135,7 @@ defmodule ToriEconomy.Shop do
            "balance" => Integer.to_string(remaining), "presentation_key" => "shop.purchase.success"})
     else
       {:error, code} -> error(code)
+      false -> error("INSUFFICIENT_FUNDS")
     end
   end
 
@@ -75,7 +164,22 @@ defmodule ToriEconomy.Shop do
       current > (item.max_stack || 9_223_372_036_854_775_807) - amount -> {:error, "MAX_STACK_REACHED"}
       not item.stackable and current > 0 -> {:error, "ALREADY_OWNED"}
       level < item.level_requirement -> {:error, "REQUIREMENT_NOT_MET"}
+      not career_unlocked?(user_id, item.career_requirement, item.career_level_requirement) ->
+        {:error, "REQUIREMENT_NOT_MET"}
       true -> :ok
+    end
+  end
+
+  defp career_unlocked?(_user, nil, _required_level), do: true
+  defp career_unlocked?(user, required_career, required_level) do
+    case Sql.query!("""
+      SELECT p.career_code,coalesce(max(t.level),1)
+      FROM economy_v2_career_progress p
+      LEFT JOIN economy_v2_xp_thresholds t ON t.required_xp<=coalesce(p.xp,0)
+      WHERE p.user_id=$1 GROUP BY p.career_code
+    """, [user]).rows do
+      [[^required_career, career_level]] -> career_level >= required_level
+      _ -> false
     end
   end
 

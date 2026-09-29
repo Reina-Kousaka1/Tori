@@ -428,11 +428,13 @@ defmodule ToriEconomy.LedgerIntegrationTest do
 
     assert {:ok, inventory} = Queries.execute(request("inventory.list", actor, user_id()) |> put_in([:context, "target_user_id"], target))
     assert inventory["result"]["user_id"] == target
-    assert inventory["result"]["items"] == [%{"item_id" => "fish", "quantity" => "3"}]
+    assert [%{"item_id" => "fish", "quantity" => "3", "name" => "fish"}] =
+      Enum.map(inventory["result"]["items"], &Map.take(&1, ["item_id", "quantity", "name"]))
 
     assert {:ok, profile} = Queries.execute(request("profile.snapshot", actor, user_id()) |> put_in([:context, "target_user_id"], target))
     assert profile["result"]["balance"] == "4821"
-    assert profile["result"]["items"] == [%{"item_id" => "fish", "quantity" => "3"}]
+    assert [%{"item_id" => "fish", "quantity" => "3"}] =
+      Enum.map(profile["result"]["items"], &Map.take(&1, ["item_id", "quantity"]))
     assert profile["result"]["equipment"] == [%{"slot" => "rod", "item_id" => "fishing_rod"}]
 
     assert {:ok, catalog} = Queries.execute(request("shop.catalog", actor, user_id(), %{"category" => "api_test"}))

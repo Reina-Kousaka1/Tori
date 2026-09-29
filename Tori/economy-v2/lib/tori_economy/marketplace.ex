@@ -2,19 +2,54 @@ defmodule ToriEconomy.Marketplace do
   @moduledoc "Escrowed user listings; isolated-test writes only until exclusive ownership cutover."
   alias ToriEconomy.{Catalog, Idempotency, Inventory, Sql}
 
+  def execute(%{operation: "marketplace.inspect"} = request) do
+    case Sql.query!("""
+      SELECT l.listing_id,l.seller_user_id,l.item_id,c.name,c.description,c.category,c.rarity,
+             l.quantity,l.ask_price,floor(extract(epoch from l.expires_at))::bigint
+      FROM economy_v2_marketplace_listings l
+      JOIN economy_v2_catalog_items c ON c.item_id=l.item_id
+      WHERE l.listing_id=$1 AND l.status='ACTIVE' AND l.expires_at>now()
+    """, [request.args["listing_id"]]).rows do
+      [[id, seller, item_id, name, description, category, rarity, quantity, price, expires]] ->
+        {:ok, %{"request_id" => request.request_id, "status" => "ok", "result" => %{
+          "type" => "marketplace_listing_detail", "listing_id" => id,
+          "seller_user_id" => seller, "item_id" => item_id, "name" => name,
+          "description" => description, "category" => category, "rarity" => rarity,
+          "quantity" => Integer.to_string(quantity), "ask_price" => Integer.to_string(price),
+          "expires_at_epoch" => Integer.to_string(expires)}}}
+
+      [] ->
+        {:ok, %{"request_id" => request.request_id, "status" => "error",
+          "error" => %{"code" => "ITEM_NOT_AVAILABLE", "retryable" => false}}}
+    end
+  end
+
   def execute(%{operation: "marketplace.browse"} = request) do
+    category = Map.get(request.args, "category", "all")
+    [[total]] = Sql.query!("""
+      SELECT count(*) FROM economy_v2_marketplace_listings l
+      JOIN economy_v2_catalog_items c ON c.item_id=l.item_id
+      WHERE l.status='ACTIVE' AND l.expires_at>now() AND ($1='all' OR c.category=$1)
+    """, [category]).rows
+    total_pages = max(1, div(total + 19, 20))
+    page = min(Map.get(request.args, "page", 0), total_pages - 1)
     listings = Sql.query!("""
-      SELECT listing_id,seller_user_id,item_id,quantity,ask_price,extract(epoch from expires_at)::bigint
-      FROM economy_v2_marketplace_listings
-      WHERE status='ACTIVE' AND expires_at>now() ORDER BY created_at DESC LIMIT 50
-    """).rows
-    |> Enum.map(fn [id, seller, item, qty, price, expires] ->
-      %{"listing_id" => id, "seller_user_id" => seller, "item_id" => item,
-        "quantity" => Integer.to_string(qty), "ask_price" => Integer.to_string(price),
-        "expires_at_epoch" => Integer.to_string(expires)}
+      SELECT l.listing_id,l.seller_user_id,l.item_id,c.name,c.category,c.rarity,
+             l.quantity,l.ask_price,floor(extract(epoch from l.expires_at))::bigint
+      FROM economy_v2_marketplace_listings l
+      JOIN economy_v2_catalog_items c ON c.item_id=l.item_id
+      WHERE l.status='ACTIVE' AND l.expires_at>now() AND ($1='all' OR c.category=$1)
+      ORDER BY l.created_at DESC,l.listing_id LIMIT 20 OFFSET $2
+    """, [category, page * 20]).rows
+    |> Enum.map(fn [id, seller, item, name, item_category, rarity, qty, price, expires] ->
+      %{"listing_id" => id, "seller_user_id" => seller, "item_id" => item, "name" => name,
+        "category" => item_category, "rarity" => rarity, "quantity" => Integer.to_string(qty),
+        "ask_price" => Integer.to_string(price), "expires_at_epoch" => Integer.to_string(expires)}
     end)
     {:ok, %{"request_id" => request.request_id, "status" => "ok",
-            "result" => %{"type" => "marketplace_listings", "listings" => listings}}}
+            "result" => %{"type" => "marketplace_listings", "listings" => listings,
+              "category" => category, "page" => page, "page_size" => 20, "total_items" => total,
+              "total_pages" => total_pages}}}
   end
 
   def execute(request) do
@@ -41,7 +76,9 @@ defmodule ToriEconomy.Marketplace do
       """, [listing_id, seller, item_id, quantity, String.to_integer(request.args["ask_price"]),
              request.args["expires_hours"]])
       ok(%{"type" => "marketplace_listing", "listing_id" => listing_id,
-           "item_id" => item_id, "quantity" => quantity})
+           "item_id" => item_id, "item_name" => item.name, "quantity" => quantity,
+           "ask_price" => request.args["ask_price"],
+           "presentation_key" => "marketplace.list.success"})
     else
       {:error, code} -> error(code)
     end
@@ -53,7 +90,8 @@ defmodule ToriEconomy.Marketplace do
     with {:ok, [^actor, item_id, quantity]} <- locked_listing(listing_id, true),
          {:ok, _} <- Inventory.restore_escrow(actor, item_id, quantity, request) do
       Sql.query!("UPDATE economy_v2_marketplace_listings SET status='CANCELLED',closed_at=now() WHERE listing_id=$1", [listing_id])
-      ok(%{"type" => "marketplace_cancelled", "listing_id" => listing_id})
+      ok(%{"type" => "marketplace_cancelled", "listing_id" => listing_id,
+           "presentation_key" => "marketplace.cancel.success"})
     else
       {:ok, _} -> error("INVALID_TARGET")
       {:error, code} -> error(code)

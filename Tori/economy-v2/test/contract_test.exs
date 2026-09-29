@@ -84,6 +84,7 @@ defmodule ToriEconomy.ContractTest do
   test "inventory, catalog and leaderboard reads validate bounded arguments without idempotency keys" do
     for {operation, args} <- [
           {"inventory.list", %{}},
+          {"inventory.item", %{"item_id" => "leopard_baby_tee"}},
           {"shop.catalog", %{"category" => "tools"}},
           {"wallet.leaderboard", %{"limit" => 100}}
         ] do
@@ -95,5 +96,12 @@ defmodule ToriEconomy.ContractTest do
     invalid_category = @base |> Map.put("operation", "shop.catalog") |> Map.put("args", %{"category" => "Tools/All"}) |> Map.delete("idempotency_key")
     assert {:error, "INVALID_INPUT"} = Contract.validate(invalid_limit)
     assert {:error, "INVALID_INPUT"} = Contract.validate(invalid_category)
+  end
+
+  test "marketplace listing inspection is a read and validates only a stable listing ID" do
+    inspect = @base |> Map.put("operation", "marketplace.inspect")
+      |> Map.put("args", %{"listing_id" => "listing_123"}) |> Map.delete("idempotency_key")
+    assert {:ok, %{operation: "marketplace.inspect"}} = Contract.validate(inspect)
+    assert {:error, "INVALID_INPUT"} = Contract.validate(put_in(inspect, ["args", "listing_id"], "../private"))
   end
 end

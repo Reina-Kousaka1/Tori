@@ -1,6 +1,6 @@
 defmodule ToriEconomy.RewriteDomainTest do
   use ExUnit.Case, async: false
-  alias ToriEconomy.{Activity, Api, Consumables, Contract, Equipment, Marketplace, Progression, Shop, Sql, TestSchema, WriteGate}
+  alias ToriEconomy.{Activity, Api, Consumables, Contract, Equipment, Marketplace, Progression, Queries, Shop, Sql, TestSchema, WriteGate}
   alias ToriEconomy.Shop.Rotation
 
   @url System.get_env("TORI_ECONOMY_TEST_DATABASE_URL")
@@ -41,6 +41,114 @@ defmodule ToriEconomy.RewriteDomainTest do
     refute Enum.any?(selected, &(&1.id == "b"))
   end
 
+  test "V10 catalog expands style categories without replacing original identifiers" do
+    assert [[count]] = Sql.query!("SELECT count(*) FROM economy_v2_catalog_items WHERE active").rows
+    assert count >= 125
+
+    for category <- ~w(fashion accessories beauty ballet volleyball cheer consumables collectibles seasonal) do
+      assert [[true]] = Sql.query!("SELECT count(*)>0 FROM economy_v2_catalog_items WHERE active AND category=$1", [category]).rows
+    end
+
+    assert [[1]] = Sql.query!("SELECT count(*) FROM economy_v2_catalog_items WHERE item_id='leopard_baby_tee'").rows
+    assert [[2]] = Sql.query!("SELECT count(*) FROM economy_v2_consumable_effects WHERE active").rows
+    assert [[6]] = Sql.query!("SELECT count(*) FROM economy_v2_activity_effect_rules WHERE active").rows
+  end
+
+  test "career selection, practice, career XP, cooldown and replay are stateful and idempotent" do
+    user = snowflake()
+    select = request("career.select", user, %{"career_code" => "ballet"})
+    assert {:ok, chosen} = Progression.execute(select)
+    assert chosen["result"]["career_code"] == "ballet"
+    assert {:ok, replay} = Progression.execute(%{select | request_id: Ecto.UUID.generate()})
+    assert replay["result"] == chosen["result"]
+
+    practice = request("career.practice", user, %{"career_code" => "ballet", "action_code" => "practice"})
+    assert {:ok, earned} = Progression.execute(practice)
+    assert earned["result"]["xp_awarded"] == "16"
+    assert {:ok, practice_replay} = Progression.execute(%{practice | request_id: Ecto.UUID.generate()})
+    assert practice_replay["result"] == earned["result"]
+    assert [[16]] = Sql.query!("SELECT xp FROM economy_v2_account_progress WHERE user_id=$1", [user]).rows
+    assert [[16]] = Sql.query!("SELECT xp FROM economy_v2_career_progress WHERE user_id=$1 AND career_code='ballet'", [user]).rows
+
+    blocked = request("career.practice", user, %{"career_code" => "ballet", "action_code" => "practice"})
+    assert {:ok, %{"error" => %{"code" => "COOLDOWN_ACTIVE"}}} = Progression.execute(blocked)
+    assert [[16]] = Sql.query!("SELECT xp FROM economy_v2_account_progress WHERE user_id=$1", [user]).rows
+  end
+
+  test "career switching preserves old progression and profile reflects the new selection" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+    Sql.query!("INSERT INTO economy_v2_career_selections(user_id,career_code,selected_at) VALUES ($1,'ballet',now()-interval '25 hours')", [user])
+    Sql.query!("INSERT INTO economy_v2_career_progress(user_id,career_code,xp) VALUES ($1,'ballet',400)", [user])
+
+    switch = request("career.select", user, %{"career_code" => "volleyball"})
+    assert {:ok, result} = Progression.execute(switch)
+    assert result["result"]["career_code"] == "volleyball"
+    assert [[400]] = Sql.query!("SELECT xp FROM economy_v2_career_progress WHERE user_id=$1 AND career_code='ballet'", [user]).rows
+    assert {:ok, profile} = Queries.execute(request("profile.snapshot", user))
+    assert profile["result"]["progression"]["active_career"]["code"] == "volleyball"
+  end
+
+  test "career unlocks remain earned after selecting another career" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'ballet_lace_leotard',1)", [user])
+    Sql.query!("INSERT INTO economy_v2_career_progress(user_id,career_code,xp) VALUES ($1,'ballet',100)", [user])
+    Sql.query!("INSERT INTO economy_v2_career_selections(user_id,career_code,selected_at) VALUES ($1,'volleyball',now())", [user])
+
+    assert {:ok, equipped} = Equipment.execute(request("inventory.equip", user,
+      %{"item_id" => "ballet_lace_leotard", "slot" => "top"}))
+    assert equipped["result"]["item_id"] == "ballet_lace_leotard"
+  end
+
+  test "profile snapshot reflects persisted XP, career, outfit and selected cosmetics" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,321)", [user])
+    Sql.query!("INSERT INTO economy_v2_account_progress(user_id,xp) VALUES ($1,1000)", [user])
+    Sql.query!("INSERT INTO economy_v2_career_selections(user_id,career_code) VALUES ($1,'ballet')", [user])
+    Sql.query!("INSERT INTO economy_v2_career_progress(user_id,career_code,xp) VALUES ($1,'ballet',400)", [user])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'soft_pink_slip_dress',1),($1,'soft_rose_makeup',1)", [user])
+    Sql.query!("INSERT INTO economy_v2_loadout(user_id,slot,item_id) VALUES ($1,'dress','soft_pink_slip_dress')", [user])
+    Sql.query!("INSERT INTO economy_v2_cosmetic_selections(user_id,slot,item_id) VALUES ($1,'makeup','soft_rose_makeup')", [user])
+    assert {:ok, response} = Queries.execute(request("profile.snapshot", user))
+    profile = response["result"]
+    assert profile["balance"] == "321"
+    assert profile["progression"]["xp"] == "1000"
+    assert profile["progression"]["level"] == 4
+    assert profile["progression"]["active_career"]["code"] == "ballet"
+    assert [%{"slot" => "dress", "name" => "Soft Pink Slip Dress"}] =
+      Enum.map(profile["loadout"], &Map.take(&1, ["slot", "name"]))
+    assert [%{"slot" => "makeup", "name" => "Soft Rose Makeup Style"}] =
+      Enum.map(profile["cosmetics"], &Map.take(&1, ["slot", "name"]))
+  end
+
+  test "permanent cosmetic selection requires ownership and remains distinct from consumables" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'soft_rose_makeup',1)", [user])
+    selection = request("inventory.cosmetic.select", user,
+      %{"item_id" => "soft_rose_makeup", "slot" => "makeup"})
+    assert {:ok, first} = Equipment.execute(selection)
+    assert {:ok, replay} = Equipment.execute(%{selection | request_id: Ecto.UUID.generate()})
+    assert replay["result"] == first["result"]
+    assert [["soft_rose_makeup"]] =
+      Sql.query!("SELECT item_id FROM economy_v2_cosmetic_selections WHERE user_id=$1 AND slot='makeup'", [user]).rows
+    assert [[1]] = Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='soft_rose_makeup'", [user]).rows
+  end
+
+  test "wardrobe inventory filters by category and paginates persisted ownership" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'leopard_baby_tee',1),($1,'pink_lace_cami',1),($1,'soft_rose_makeup',1)", [user])
+    assert {:ok, page} = Queries.execute(request("inventory.list", user, %{"category" => "fashion", "page" => 0}))
+    assert page["result"]["total_items"] == 2
+    assert Enum.all?(page["result"]["items"], &(&1["category"] == "fashion"))
+    assert page["result"]["total_pages"] == 1
+    assert {:ok, wardrobe} = Queries.execute(request("wardrobe.list", user, %{"category" => "all", "page" => 0}))
+    assert wardrobe["result"]["total_items"] == 3
+    assert Enum.all?(wardrobe["result"]["items"], &(&1["equip_slots"] != [] or &1["cosmetic_slots"] != []))
+  end
+
   test "new mutations are test-only and disabled mode is read-only" do
     System.put_env("TORI_ECONOMY_WRITE_ENABLED", "true")
     System.put_env("TORI_ECONOMY_WRITE_MODE", "disabled")
@@ -73,7 +181,11 @@ defmodule ToriEconomy.RewriteDomainTest do
     System.put_env("TORI_ECONOMY_WRITE_MODE", "test")
     System.put_env("TORI_ECONOMY_DATABASE_URL", @url)
     {:ok, rotation} = Rotation.current()
-    item = Enum.find(rotation["items"], &(&1["remaining"] == nil)) || hd(rotation["items"])
+    item = Enum.find(rotation["items"], fn item ->
+      is_nil(item["remaining"]) and item["level_requirement"] == 1 and
+        is_nil(item["career_requirement"])
+    end)
+    assert item
     args = %{"item_id" => item["item_id"], "quantity" => 1,
              "period_key" => rotation["period_key"]}
     first_request = request("shop.purchase", user, args)
@@ -83,6 +195,14 @@ defmodule ToriEconomy.RewriteDomainTest do
     assert replay["result"] == first["result"]
     assert [[1]] = Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1",
       [first_request.idempotency_key]).rows
+
+    browse = request("shop.rotation", user, %{"category" => "all", "page" => 0})
+    assert {:ok, page} = Shop.execute(browse)
+    assert page["result"]["total_items"] >= 12
+    assert Enum.any?(page["result"]["items"], &(&1["state"] in ["available", "owned", "locked", "sold"]))
+    assert {:ok, details} = Shop.execute(request("shop.item", user, %{
+      "item_id" => item["item_id"], "period_key" => rotation["period_key"]}))
+    assert details["result"]["name"] == item["name"]
   end
 
   test "configured career XP is idempotent and does not invent a threshold" do
@@ -120,6 +240,13 @@ defmodule ToriEconomy.RewriteDomainTest do
     listing = request("marketplace.list", seller, %{"item_id" => "pink_lace_cami", "quantity" => 1,
       "ask_price" => "90", "expires_hours" => 24})
     assert {:ok, %{"result" => %{"listing_id" => id}}} = Marketplace.execute(listing)
+    assert {:ok, browse} = Marketplace.execute(request("marketplace.browse", buyer,
+      %{"category" => "fashion", "page" => 0}))
+    assert browse["result"]["total_items"] == 1
+    assert hd(browse["result"]["listings"])["listing_id"] == id
+    assert {:ok, detail} = Marketplace.execute(request("marketplace.inspect", buyer, %{"listing_id" => id}))
+    assert detail["result"]["seller_user_id"] == seller
+    assert detail["result"]["ask_price"] == "90"
     purchase = request("marketplace.buy", buyer, %{"listing_id" => id})
     assert {:ok, first} = Marketplace.execute(purchase)
     assert first["status"] == "ok"
@@ -146,6 +273,18 @@ defmodule ToriEconomy.RewriteDomainTest do
     cancel = request("marketplace.cancel", seller, %{"listing_id" => id})
     assert {:ok, %{"status" => "ok"}} = Marketplace.execute(cancel)
     assert [[1]] = Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='soft_pink_slip_dress'", [seller]).rows
+  end
+
+  test "wardrobe enforces dress slot conflicts and inventory inspection uses owned catalog data" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'leopard_baby_tee',1),($1,'soft_pink_slip_dress',1)", [user])
+    assert {:ok, _} = Equipment.execute(request("inventory.equip", user, %{"item_id" => "leopard_baby_tee", "slot" => "top"}))
+    assert {:ok, _} = Equipment.execute(request("inventory.equip", user, %{"item_id" => "soft_pink_slip_dress", "slot" => "dress"}))
+    assert [["dress", "soft_pink_slip_dress"]] = Sql.query!("SELECT slot,item_id FROM economy_v2_loadout WHERE user_id=$1", [user]).rows
+    assert {:ok, detail} = Queries.execute(request("inventory.item", user, %{"item_id" => "soft_pink_slip_dress"}))
+    assert detail["result"]["description"] == "A simple glossy evening look."
+    assert detail["result"]["equip_slots"] == ["dress"]
   end
 
   test "gather uses existing tool, wallet, inventory and cooldown atomically" do
@@ -200,6 +339,12 @@ defmodule ToriEconomy.RewriteDomainTest do
     assert replay["result"] == first["result"]
     assert [[1]] = Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='practice_water'", [user]).rows
     assert [[1]] = Sql.query!("SELECT count(*) FROM economy_v2_active_effects WHERE user_id=$1 AND effect_code='test_refresh'", [user]).rows
+    assert {:ok, inspected} = Queries.execute(request("inventory.item", user, %{"item_id" => "practice_water"}))
+    assert inspected["result"]["effect_code"] == "test_refresh"
+    assert inspected["result"]["effect_duration_ms"] == 60_000
+    assert inspected["result"]["effect_active"]
+    assert {:ok, effects} = Consumables.execute(request("inventory.effects", user))
+    assert Enum.any?(effects["result"]["effects"], &(&1["effect_code"] == "test_refresh"))
     Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'fishing_rod',1)", [user])
     Sql.query!("INSERT INTO economy_equipment(user_id,slot,item_id) VALUES ($1,'rod','fishing_rod')", [user])
     Sql.query!("""
@@ -209,6 +354,23 @@ defmodule ToriEconomy.RewriteDomainTest do
     """)
     assert {:ok, gather} = Activity.execute(request("activity.perform", user, %{"activity" => "fish"}), fn _ -> 1 end)
     assert gather["result"]["credits"] == "15"
+  end
+
+  test "starter consumable effects apply once through the gated activity domain" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'practice_water',1),($1,'fishing_rod',1)", [user])
+    Sql.query!("INSERT INTO economy_equipment(user_id,slot,item_id) VALUES ($1,'rod','fishing_rod')", [user])
+    consume = request("inventory.consume", user, %{"item_id" => "practice_water"})
+    assert {:ok, used} = Consumables.execute(consume)
+    assert used["result"]["effect_code"] == "hydration_boost"
+    assert {:ok, replay} = Consumables.execute(%{consume | request_id: Ecto.UUID.generate()})
+    assert replay["result"] == used["result"]
+    assert [[0]] = Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='practice_water'", [user]).rows
+
+    gather = request("activity.perform", user, %{"activity" => "fish"})
+    assert {:ok, result} = Activity.execute(gather, fn _ -> 1 end)
+    assert result["result"]["credits"] == "11"
   end
 
   defp restore(name, nil), do: System.delete_env(name)

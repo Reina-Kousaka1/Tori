@@ -8,7 +8,8 @@ defmodule ToriEconomy.WriteGate do
   @mutations @production_mutations ++ ["shop.rotate", "shop.purchase", "inventory.equip",
                                      "inventory.unequip", "progression.grant", "marketplace.list",
                                      "marketplace.buy", "marketplace.cancel", "activity.perform",
-                                     "inventory.consume"]
+                                     "inventory.consume", "inventory.cosmetic.select",
+                                     "inventory.cosmetic.clear", "career.select", "career.practice"]
 
   def authorize(operation) when operation in @mutations do
     if System.get_env("TORI_ECONOMY_WRITE_ENABLED") == "true" and mode_allows?(operation) do

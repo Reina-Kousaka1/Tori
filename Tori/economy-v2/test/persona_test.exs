@@ -36,6 +36,15 @@ defmodule ToriEconomy.PersonaTest do
     assert Mood.event_from_name("made_up_event") == :error
   end
 
+  test "repeating a mood event inside its cooldown does not refresh its duration" do
+    initial = Mood.new(1_000)
+    first = Mood.transition(initial, :successful_activity, 2_000)
+    repeated = Mood.transition(first, :successful_activity, 60_000)
+    assert repeated.started_at_ms == 2_000
+    assert repeated.reason == :successful_activity
+    refute repeated.intensity > first.intensity
+  end
+
   test "persona phrases receive structured values and serious contexts stay factual" do
     mood = %{mood: :happy, intensity: 0.8}
     playful = Persona.snapshot(context: :economy, mood: mood, date: ~D[2026-04-01])

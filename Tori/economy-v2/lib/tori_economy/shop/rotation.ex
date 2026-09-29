@@ -101,16 +101,23 @@ defmodule ToriEconomy.Shop.Rotation do
         items =
           Sql.query!(
             """
-            SELECT r.item_id,c.name,c.category,c.subcategory,c.rarity,r.unit_price,
-                   r.stock_limit,r.sold FROM economy_v2_shop_rotation_items r
+            SELECT r.item_id,c.name,c.description,c.category,c.subcategory,c.rarity,r.unit_price,
+                   r.stock_limit,r.sold,c.level_requirement,c.season,c.tags,
+                   c.career_requirement,c.career_level_requirement
+            FROM economy_v2_shop_rotation_items r
             JOIN economy_v2_catalog_items c ON c.item_id=r.item_id
             WHERE r.period_key=$1 ORDER BY r.position
             """,
             [period_key]
           ).rows
-          |> Enum.map(fn [id, name, category, subcategory, rarity, price, stock_limit, sold] ->
+          |> Enum.map(fn [id, name, description, category, subcategory, rarity, price,
+                          stock_limit, sold, level_requirement, item_season, tags,
+                          career_requirement, career_level_requirement] ->
             %{"item_id" => id, "name" => name, "category" => category,
-              "subcategory" => subcategory, "rarity" => rarity,
+              "description" => description, "subcategory" => subcategory, "rarity" => rarity,
+              "level_requirement" => level_requirement, "career_requirement" => career_requirement,
+              "career_level_requirement" => career_level_requirement,
+              "season" => item_season, "tags" => tags,
               "unit_price" => Integer.to_string(price),
               "remaining" => if(stock_limit, do: Integer.to_string(stock_limit - sold), else: nil)}
           end)

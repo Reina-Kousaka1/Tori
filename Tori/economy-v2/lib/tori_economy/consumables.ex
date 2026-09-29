@@ -26,7 +26,8 @@ defmodule ToriEconomy.Consumables do
     item_id = request.args["item_id"]
     Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1) ON CONFLICT DO NOTHING", [user])
     Sql.query!("SELECT user_id FROM economy_accounts WHERE user_id=$1 FOR UPDATE", [user])
-    with {:ok, %{consumable: true}} <- Catalog.fetch_for_update(item_id),
+    with {:ok, item} <- Catalog.fetch_for_update(item_id),
+         true <- item.consumable || {:error, "REQUIREMENT_NOT_MET"},
          {:ok, effect, duration} <- configured_effect(item_id),
          {:ok, _} <- Inventory.take(user, item_id, 1, request, "consume", "CONSUMABLE_USED") do
       [[expires]] = Sql.query!("""
@@ -41,7 +42,9 @@ defmodule ToriEconomy.Consumables do
         RETURNING floor(extract(epoch from expires_at)*1000)::bigint
       """, [user, effect, item_id, duration, request.idempotency_key]).rows
       %{"status" => "ok", "result" => %{"type" => "consumable_used", "item_id" => item_id,
-        "effect_code" => effect, "expires_at_ms" => Integer.to_string(expires)}}
+        "item_name" => item.name, "effect_code" => effect,
+        "expires_at_ms" => Integer.to_string(expires),
+        "presentation_key" => "consumable.use.success"}}
     else
       {:ok, _} -> error("REQUIREMENT_NOT_MET")
       {:error, code} -> error(code)

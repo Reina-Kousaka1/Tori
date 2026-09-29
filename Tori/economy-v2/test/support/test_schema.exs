@@ -150,9 +150,20 @@ defmodule ToriEconomy.TestSchema do
       SQL.query!(Repo, "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'economy_v2_catalog_items'", []).rows
       |> Enum.map(&hd/1)
 
-    unless Enum.all?(["subcategory", "rarity", "rotation_weight", "equip_slots", "max_stack"],
+    unless Enum.all?(["subcategory", "rarity", "rotation_weight", "equip_slots", "max_stack",
+                      "cosmetic_slots", "career_requirement", "career_level_requirement"],
              &(&1 in catalog_columns)) do
       raise "Incomplete Tori test schema: additive catalog columns are missing"
+    end
+
+    [[catalog_count]] = SQL.query!(Repo, "SELECT count(*) FROM economy_v2_catalog_items WHERE active", []).rows
+    unless catalog_count >= 125 do
+      raise "Incomplete Tori test schema: expanded catalog migration is missing"
+    end
+
+    unless Enum.all?(["economy_v2_career_selections", "economy_v2_career_actions",
+                      "economy_v2_cosmetic_selections"], &(&1 in public_tables())) do
+      raise "Incomplete Tori test schema: progression or cosmetic selection schema is missing"
     end
 
     unless SQL.query!(Repo, "SELECT count(*) FROM economy_v2_catalog_items WHERE item_id='leopard_baby_tee'", []).rows == [[1]] do

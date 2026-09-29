@@ -94,7 +94,7 @@ defmodule ToriEconomy.Activity do
       "credits" => Integer.to_string(credits), "drop_item_id" => drop_id,
       "tool_remaining" => max(0, durability - wear - 1), "tool_broke" => broke,
       "balance" => Integer.to_string(next), "xp" => xp,
-      "presentation_key" => "activity.success"}}
+      "presentation_key" => "activity.#{activity}.success"}}
   end
 
   defp error(code, details \\ %{}), do:
