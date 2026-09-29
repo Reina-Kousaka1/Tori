@@ -29,6 +29,39 @@ services:
       _JAVA_OPTIONS: "-Xmx512m -Xms256m"
     volumes:
       - ./application.yml:/opt/Lavalink/application.yml:ro
+  economy-api:
+    build:
+      context: ./economy-v2
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    expose:
+      - "4001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TORI_ECONOMY_API_ENABLED: "true"
+      TORI_ECONOMY_API_SECRET: ${TORI_ECONOMY_API_SECRET:?Economy-API-Secret in .env setzen}
+      TORI_ECONOMY_BIND: 0.0.0.0
+      TORI_ECONOMY_PORT: "4001"
+      TORI_ECONOMY_DATABASE_HOST: postgres
+      TORI_ECONOMY_DATABASE_PORT: "5432"
+      TORI_ECONOMY_DATABASE_NAME: tori_main
+      TORI_ECONOMY_DATABASE_USER: tori
+      TORI_ECONOMY_DATABASE_PASSWORD: ${TORI_POSTGRES_PASSWORD:?PostgreSQL-Passwort in .env setzen}
+      TORI_ECONOMY_WRITE_ENABLED: ${TORI_ECONOMY_WRITE_ENABLED:-false}
+      TORI_ECONOMY_WRITE_MODE: ${TORI_ECONOMY_WRITE_MODE:-disabled}
+      TORI_ECONOMY_PRODUCTION_DATABASE_NAME: ${TORI_ECONOMY_PRODUCTION_DATABASE_NAME:-}
+      TORI_ECONOMY_PRODUCTION_CUTOVER_ACK: ${TORI_ECONOMY_PRODUCTION_CUTOVER_ACK:-}
+      TORI_ECONOMY_PRODUCTION_WRITE_OPERATIONS: ${TORI_ECONOMY_PRODUCTION_WRITE_OPERATIONS:-}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:4001/internal/economy/v1/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
   bot:
     build: .
     restart: always
@@ -52,5 +85,7 @@ services:
       TORI_DATABASE_PASSWORD: ${TORI_POSTGRES_PASSWORD:?PostgreSQL-Passwort in .env setzen}
       LAVALINK_URI: ws://lavalink:2333
       LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:?Passwort in .env setzen}
+      TORI_ECONOMY_URL: http://economy-api:4001
+      TORI_ECONOMY_API_SECRET: ${TORI_ECONOMY_API_SECRET:?Economy-API-Secret in .env setzen}
 volumes:
   postgres-data:

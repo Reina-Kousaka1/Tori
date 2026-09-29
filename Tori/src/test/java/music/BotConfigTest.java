@@ -71,7 +71,7 @@ class BotConfigTest {
         assertEquals(System.getenv(key), BotConfig.load(directory).required(key));
     }
 
-    @Test void economyV2BalanceIsOptInAndRestrictedToLocalHttp() throws Exception {
+    @Test void economyV2ClientIsOptInAndRestrictedToLoopbackOrComposeService() throws Exception {
         Files.writeString(directory.resolve(".env"), ""
             + "TORI_ECONOMY_BALANCE_SOURCE=LEGACY\n");
         assertNull(BotConfig.load(directory).economyV2BalanceClient());
@@ -81,6 +81,19 @@ class BotConfigTest {
             + "TORI_ECONOMY_URL=http://127.0.0.1:4001\n"
             + "TORI_ECONOMY_API_SECRET=local-test-secret-with-at-least-32-characters\n");
         assertNotNull(BotConfig.load(directory).economyV2BalanceClient());
+
+        Files.writeString(directory.resolve(".env"), ""
+            + "TORI_ECONOMY_BALANCE_SOURCE=ELIXIR\n"
+            + "TORI_ECONOMY_URL=http://economy-api:4001\n"
+            + "TORI_ECONOMY_API_SECRET=local-test-secret-with-at-least-32-characters\n");
+        assertNotNull(BotConfig.load(directory).economyV2BalanceClient());
+
+        Files.writeString(directory.resolve(".env"), ""
+            + "TORI_ECONOMY_BALANCE_SOURCE=ELIXIR\n"
+            + "TORI_ECONOMY_URL=http://untrusted.example:4001\n"
+            + "TORI_ECONOMY_API_SECRET=local-test-secret-with-at-least-32-characters\n");
+        assertThrows(BotConfig.ConfigurationException.class,
+            () -> BotConfig.load(directory).economyV2BalanceClient());
 
         Files.writeString(directory.resolve(".env"), ""
             + "TORI_ECONOMY_BALANCE_SOURCE=ELIXIR\n"

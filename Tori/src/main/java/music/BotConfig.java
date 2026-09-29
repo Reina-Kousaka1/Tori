@@ -87,8 +87,8 @@ public final class BotConfig {
         catch (IllegalArgumentException ex) { throw new ConfigurationException("TORI_ECONOMY_URL is invalid."); }
         if (!"http".equals(url.getScheme()) || url.getUserInfo() != null || url.getQuery() != null ||
                 url.getFragment() != null || !"".equals(url.getPath()) && !"/".equals(url.getPath()) ||
-                !java.util.Set.of("127.0.0.1", "localhost", "[::1]").contains(url.getHost()))
-            throw new ConfigurationException("TORI_ECONOMY_URL must be a local HTTP origin.");
+                !java.util.Set.of("127.0.0.1", "localhost", "[::1]", "economy-api").contains(url.getHost()))
+            throw new ConfigurationException("TORI_ECONOMY_URL must be a loopback or internal economy-api HTTP origin.");
         String secret = required("TORI_ECONOMY_API_SECRET");
         if (secret.length() < 32)
             throw new ConfigurationException("TORI_ECONOMY_API_SECRET must have at least 32 characters.");

@@ -10,8 +10,6 @@ defmodule ToriEconomy.Application do
       if enabled? do
         :ok = ToriEconomy.WriteGate.validate_startup!()
         secret = System.fetch_env!("TORI_ECONOMY_API_SECRET")
-        url = System.fetch_env!("TORI_ECONOMY_DATABASE_URL")
-
         if byte_size(secret) < 32,
           do: raise("TORI_ECONOMY_API_SECRET must have at least 32 bytes")
 
@@ -19,7 +17,7 @@ defmodule ToriEconomy.Application do
         bind = System.get_env("TORI_ECONOMY_BIND", "127.0.0.1") |> String.to_charlist()
         {:ok, ip} = :inet.parse_address(bind)
 
-        Application.put_env(:tori_economy, ToriEconomy.Repo, url: url, pool_size: 5)
+        Application.put_env(:tori_economy, ToriEconomy.Repo, database_options() ++ [pool_size: 5])
 
         [
           ToriEconomy.Repo,
@@ -30,5 +28,21 @@ defmodule ToriEconomy.Application do
       end
 
     Supervisor.start_link(children, strategy: :one_for_one, name: ToriEconomy.Supervisor)
+  end
+
+  defp database_options do
+    case System.get_env("TORI_ECONOMY_DATABASE_URL") do
+      url when is_binary(url) and url != "" ->
+        [url: url]
+
+      _ ->
+        [
+          hostname: System.fetch_env!("TORI_ECONOMY_DATABASE_HOST"),
+          port: System.get_env("TORI_ECONOMY_DATABASE_PORT", "5432") |> String.to_integer(),
+          username: System.fetch_env!("TORI_ECONOMY_DATABASE_USER"),
+          password: System.fetch_env!("TORI_ECONOMY_DATABASE_PASSWORD"),
+          database: System.fetch_env!("TORI_ECONOMY_DATABASE_NAME")
+        ]
+    end
   end
 end
