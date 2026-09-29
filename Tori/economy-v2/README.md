@@ -27,6 +27,14 @@ These endpoints do not start a second Discord
 gateway or change Java's command routing. See
 `../docs/ELIXIR-REWRITE-STATUS.md` for ownership and remaining work.
 
+An optional Nostrum consumer is available for a **separate test bot only**.
+It is disabled unless `TORI_NOSTRUM_ENABLED=true` and
+`TORI_NOSTRUM_TOKEN` is supplied. It does not register commands and ignores
+all existing JDA operations; its only recognized name is the read-only
+`tori-profile-preview` command if an operator registers that command on the
+test bot. Never enable it with the production JDA token until gateway,
+interaction and presence ownership have been explicitly transferred.
+
 Routing can be set centrally, for example:
 
 ```dotenv

@@ -48,11 +48,21 @@ defmodule ToriEconomy.Application do
 
     Application.put_env(:tori_economy, ToriEconomy.Repo, database_options() ++ [pool_size: 5])
 
+    discord_children =
+      if System.get_env("TORI_NOSTRUM_ENABLED") == "true" do
+        token = System.fetch_env!("TORI_NOSTRUM_TOKEN")
+        Nostrum.Token.check_token!(token)
+        Application.put_env(:nostrum, :token, token)
+        [Nostrum.Application, ToriEconomy.Discord.NostrumConsumer]
+      else
+        []
+      end
+
     [
       ToriEconomy.Repo,
       ToriEconomy.Persona.Mood,
       {Bandit, plug: ToriEconomy.Api, ip: ip, port: port}
-    ]
+    ] ++ discord_children
   end
 
   defp database_options do
