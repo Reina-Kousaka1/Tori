@@ -26,6 +26,18 @@ defmodule ToriEconomy.ContractTest do
     assert {:error, "INVALID_INPUT"} = Contract.validate(put_in(profile, ["args", "level"], 7))
   end
 
+  test "market reads require a safe product ID and bounded history" do
+    product = %{@base | "operation" => "market.product", "idempotency_key" => nil,
+                         "args" => %{"product_id" => "fishing_rod"}}
+    assert {:ok, _} = Contract.validate(product)
+    assert {:error, "INVALID_INPUT"} = Contract.validate(put_in(product, ["args", "product_id"], "bad/id"))
+
+    history = %{product | "operation" => "market.history",
+                         "args" => %{"product_id" => "fishing_rod", "limit" => 100}}
+    assert {:ok, _} = Contract.validate(history)
+    assert {:error, "INVALID_INPUT"} = Contract.validate(put_in(history, ["args", "limit"], 101))
+  end
+
   test "fingerprint ignores field order and tracing request id" do
     assert {:ok, first} = Contract.validate(@base)
     reordered = Map.put(@base, "context", Map.new(Enum.reverse(Map.to_list(@base["context"]))))

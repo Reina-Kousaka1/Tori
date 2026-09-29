@@ -36,6 +36,10 @@ Elixir domain increment. It is not a production cutover approval.
 - `ToriEconomy.Progression.Policy` can derive a level from an explicitly
   supplied, validated threshold curve. The numeric values in its tests are
   fixtures only. No XP source, runtime curve, level reward or writer is active.
+- `ToriEconomy.Market` can read existing product details and price history
+  from the V2 Java-owned tables. It never creates quotes or performs market
+  maintenance. Market purchases, sales, scheduler ownership and Java routing
+  remain unchanged.
 
 ## Ownership and cutover boundaries
 

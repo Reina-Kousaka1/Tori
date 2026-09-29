@@ -38,6 +38,10 @@ The shop API is a read-only view over the existing market tables. Java remains
 the market writer and owns quote and purchase behavior. `TORI_MARKET_MODE=READ_ONLY`
 blocks market writes while preserving its views; shop read routing does not
 transfer market write ownership.
+`market.product` and `market.history` now expose additional read-only V2-table
+views through the same private API. Neither operation creates a quote, evolves
+a price, changes stock, or authorizes an Elixir Market writer. Java Market
+commands are not routed to these operations yet.
 
 ## Writes and ownership
 

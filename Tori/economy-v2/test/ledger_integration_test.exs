@@ -1,6 +1,6 @@
 defmodule ToriEconomy.LedgerIntegrationTest do
   use ExUnit.Case, async: false
-  alias ToriEconomy.{Accounts, Api, Queries, Repo, Sql, TestSchema}
+  alias ToriEconomy.{Accounts, Api, Market, Queries, Repo, Sql, TestSchema}
 
   @url System.get_env("TORI_ECONOMY_TEST_DATABASE_URL")
   @moduletag skip: if(is_nil(@url), do: "set TORI_ECONOMY_TEST_DATABASE_URL to an isolated *_test database", else: false)
@@ -413,10 +413,16 @@ defmodule ToriEconomy.LedgerIntegrationTest do
       [product]
     )
 
+    Sql.query!(
+      "INSERT INTO economy_market_price_history(product_id,price,changed_at,reason) VALUES ($1,314,now(),'ADMIN_CHANGE')",
+      [product]
+    )
+
     on_exit(fn ->
       Sql.query!("DELETE FROM economy_equipment WHERE user_id=$1", [target])
       Sql.query!("DELETE FROM economy_inventory WHERE user_id=$1", [target])
       Sql.query!("DELETE FROM economy_accounts WHERE user_id IN ($1,$2)", [actor, target])
+      Sql.query!("DELETE FROM economy_market_price_history WHERE product_id=$1", [product])
       Sql.query!("DELETE FROM economy_market_products WHERE product_id=$1", [product])
     end)
 
@@ -432,6 +438,12 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     assert {:ok, catalog} = Queries.execute(request("shop.catalog", actor, user_id(), %{"category" => "api_test"}))
     assert [%{"product_id" => ^product, "current_price" => "314", "effective_price" => "314", "stock" => "-1", "available" => true}] =
              catalog["result"]["products"]
+
+    assert {:ok, detail} = Market.execute(request("market.product", actor, user_id(), %{"product_id" => product}))
+    assert detail["result"]["current_price"] == "314"
+    assert detail["result"]["stock"] == "-1"
+    assert {:ok, history} = Market.execute(request("market.history", actor, user_id(), %{"product_id" => product}))
+    assert [%{"price" => "314", "reason" => "ADMIN_CHANGE"}] = history["result"]["points"] |> Enum.map(&Map.drop(&1, ["changed_at"]))
 
     assert {:ok, leaderboard} = Queries.execute(request("wallet.leaderboard", actor, user_id(), %{"limit" => 100}))
     assert Enum.any?(leaderboard["result"]["entries"], &(&1["user_id"] == target and &1["balance"] == "4821"))
@@ -449,6 +461,8 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     for {operation, args} <- [
           {"inventory.list", %{}},
           {"profile.snapshot", %{}},
+          {"market.product", %{"product_id" => product}},
+          {"market.history", %{"product_id" => product}},
           {"shop.catalog", %{"category" => "api_test"}},
           {"wallet.leaderboard", %{"limit" => 100}}
         ] do

@@ -5,7 +5,8 @@ defmodule ToriEconomy.Contract do
   @uuid ~r/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
   @max_amount 9_223_372_036_854_775_807
   @mutations ["daily.claim", "wallet.transfer"]
-  @reads ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard", "profile.snapshot"]
+  @reads ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard", "profile.snapshot",
+          "market.product", "market.history"]
   @operations @mutations ++ @reads
 
   def validate(raw) when is_map(raw) do
@@ -43,6 +44,27 @@ defmodule ToriEconomy.Contract do
   defp validate_args("daily.claim", args), do: keys(args, [])
   defp validate_args("inventory.list", args), do: keys(args, [])
   defp validate_args("profile.snapshot", args), do: keys(args, [])
+
+  defp validate_args("market.product", args), do: market_id(args, ["product_id"])
+
+  defp validate_args("market.history", args) do
+    with :ok <- market_id(args, ["product_id", "limit"]),
+         limit when is_integer(limit) and limit >= 1 and limit <= 100 <- Map.get(args, "limit", 10) do
+      :ok
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
+
+  defp market_id(args, allowed) do
+    with :ok <- keys(args, allowed),
+         id when is_binary(id) <- args["product_id"],
+         true <- Regex.match?(~r/^[a-z0-9_-]{1,64}$/, id) do
+      :ok
+    else
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
 
   defp validate_args("shop.catalog", args) do
     with :ok <- keys(args, ["category"]),
