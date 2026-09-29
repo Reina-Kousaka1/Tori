@@ -15,12 +15,13 @@ backup and restore comparisons pass.
 Run these commands from the Tori repository directory on the Pi:
 
 ```sh
-cp .env.example .env
-chmod 600 .env
+if [ ! -f .env ]; then cp .env.example .env; chmod 600 .env; fi
 openssl rand -hex 32
 nano .env
 ```
 
+This preserves an existing `.env`; do not replace it with the example file.
+If you already have one, add any missing Economy API variables shown below.
 Put real Discord and Lavalink credentials in `.env`. Set
 `TORI_POSTGRES_PASSWORD` and `LAVALINK_PASSWORD` to strong random values and
 set `TORI_ECONOMY_API_SECRET` to a separate random value from `openssl rand`.
