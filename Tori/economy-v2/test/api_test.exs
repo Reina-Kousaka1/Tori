@@ -101,6 +101,52 @@ defmodule ToriEconomy.ApiTest do
     assert_raise RuntimeError, fn -> ToriEconomy.WriteGate.validate_startup!() end
   end
 
+  test "production write gate requires explicit cutover and scopes allowed operations" do
+    keys = [
+      "TORI_ECONOMY_WRITE_ENABLED",
+      "TORI_ECONOMY_WRITE_MODE",
+      "TORI_ECONOMY_DATABASE_URL",
+      "TORI_ECONOMY_DATABASE_HOST",
+      "TORI_ECONOMY_DATABASE_NAME",
+      "TORI_ECONOMY_PRODUCTION_DATABASE_NAME",
+      "TORI_ECONOMY_PRODUCTION_CUTOVER_ACK",
+      "TORI_ECONOMY_PRODUCTION_WRITE_OPERATIONS"
+    ]
+    previous = Map.new(keys, &{&1, System.get_env(&1)})
+
+    System.put_env("TORI_ECONOMY_WRITE_ENABLED", "true")
+    System.put_env("TORI_ECONOMY_WRITE_MODE", "production")
+    System.delete_env("TORI_ECONOMY_DATABASE_URL")
+    System.put_env("TORI_ECONOMY_DATABASE_HOST", "postgres")
+    System.put_env("TORI_ECONOMY_DATABASE_NAME", "tori_main")
+    System.put_env("TORI_ECONOMY_PRODUCTION_DATABASE_NAME", "tori_main")
+    System.put_env("TORI_ECONOMY_PRODUCTION_CUTOVER_ACK", "I_VERIFIED_BACKUP_RESTORE_SCHEMA_AND_EXCLUSIVE_WRITER_OWNERSHIP")
+    System.put_env("TORI_ECONOMY_PRODUCTION_WRITE_OPERATIONS", "daily.claim")
+
+    on_exit(fn ->
+      Enum.each(previous, fn
+        {key, nil} -> System.delete_env(key)
+        {key, value} -> System.put_env(key, value)
+      end)
+    end)
+
+    assert :ok = ToriEconomy.WriteGate.validate_startup!()
+
+    transfer = Jason.encode!(%{
+      "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
+      "idempotency_key" => "discord-interaction:123456789012345678",
+      "operation" => "wallet.transfer",
+      "context" => %{"actor_user_id" => "123", "guild_id" => "234", "channel_id" => "345"},
+      "args" => %{"recipient_user_id" => "456", "amount" => "1"}
+    })
+    response = request(transfer)
+    assert response.status == 403
+    assert Jason.decode!(response.resp_body)["error"]["code"] == "READ_ONLY"
+
+    System.put_env("TORI_ECONOMY_PRODUCTION_CUTOVER_ACK", "wrong")
+    assert_raise RuntimeError, fn -> ToriEconomy.WriteGate.validate_startup!() end
+  end
+
   defp request(body) do
     conn(:post, "/internal/economy/v1/execute", body)
     |> put_req_header("authorization", "Bearer " <> String.duplicate("s", 32))

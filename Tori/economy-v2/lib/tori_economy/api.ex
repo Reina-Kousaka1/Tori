@@ -66,10 +66,8 @@ defmodule ToriEconomy.Api do
        when operation in ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard"],
        do: :ok
 
-  defp writes_allowed(_request) do
-    if WriteGate.writes_enabled?(),
-      do: :ok,
-      else: {:error, "READ_ONLY"}
+  defp writes_allowed(request) do
+    WriteGate.authorize(request.operation)
   end
 
   defp execute_request(request) do

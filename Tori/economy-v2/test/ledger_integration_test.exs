@@ -96,14 +96,17 @@ defmodule ToriEconomy.LedgerIntegrationTest do
   test "HTTP write gate is read-only by default, then test-only API writes replay safely" do
     previous_secret = System.get_env("TORI_ECONOMY_API_SECRET")
     previous_writes = System.get_env("TORI_ECONOMY_WRITE_ENABLED")
+    previous_mode = System.get_env("TORI_ECONOMY_WRITE_MODE")
     previous_url = System.get_env("TORI_ECONOMY_DATABASE_URL")
     System.put_env("TORI_ECONOMY_API_SECRET", String.duplicate("t", 32))
     System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
+    System.put_env("TORI_ECONOMY_WRITE_MODE", "test")
     System.put_env("TORI_ECONOMY_DATABASE_URL", @url)
 
     on_exit(fn ->
       if previous_secret, do: System.put_env("TORI_ECONOMY_API_SECRET", previous_secret), else: System.delete_env("TORI_ECONOMY_API_SECRET")
       if previous_writes, do: System.put_env("TORI_ECONOMY_WRITE_ENABLED", previous_writes), else: System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
+      if previous_mode, do: System.put_env("TORI_ECONOMY_WRITE_MODE", previous_mode), else: System.delete_env("TORI_ECONOMY_WRITE_MODE")
       if previous_url, do: System.put_env("TORI_ECONOMY_DATABASE_URL", previous_url), else: System.delete_env("TORI_ECONOMY_DATABASE_URL")
     end)
 
