@@ -19,7 +19,7 @@ defmodule ToriEconomy.MixProject do
     [
       {:ecto_sql, "~> 3.14"},
       {:postgrex, "~> 0.22.4"},
-      {:plug_cowboy, "~> 2.9"},
+      {:bandit, "~> 1.12.5"},
       {:jason, "~> 1.4.5"}
     ]
   end

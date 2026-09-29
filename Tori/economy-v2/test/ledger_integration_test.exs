@@ -3,9 +3,9 @@ defmodule ToriEconomy.LedgerIntegrationTest do
   alias ToriEconomy.{Accounts, Repo, Sql}
 
   @url System.get_env("TORI_ECONOMY_TEST_DATABASE_URL")
+  @moduletag skip: if(is_nil(@url), do: "set TORI_ECONOMY_TEST_DATABASE_URL to an isolated *_test database", else: false)
 
   setup_all do
-    if @url do
       uri = URI.parse(@url)
 
       unless String.ends_with?(uri.path || "", "_test") do
@@ -14,9 +14,6 @@ defmodule ToriEconomy.LedgerIntegrationTest do
 
       start_supervised!({Repo, url: @url, pool_size: 10})
       :ok
-    else
-      {:skip, "set TORI_ECONOMY_TEST_DATABASE_URL to an isolated *_test database"}
-    end
   end
 
   defp user_id do

@@ -22,7 +22,7 @@ defmodule ToriEconomy.Application do
 
         [
           ToriEconomy.Repo,
-          {Plug.Cowboy, scheme: :http, plug: ToriEconomy.Api, options: [ip: ip, port: port]}
+          {Bandit, plug: ToriEconomy.Api, ip: ip, port: port}
         ]
       else
         []

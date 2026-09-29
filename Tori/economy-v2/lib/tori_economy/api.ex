@@ -31,12 +31,16 @@ defmodule ToriEconomy.Api do
          {:ok, body, conn} <- read_body(conn, length: 32_768),
          {:ok, raw} <- Jason.decode(body),
          {:ok, request} <- Contract.validate(raw),
+         :ok <- writes_allowed(request),
          {:ok, response} <- Accounts.execute(request) do
       code = if get_in(response, ["error", "code"]) == "IDEMPOTENCY_CONFLICT", do: 409, else: 200
       reply(conn, code, response)
     else
       {:error, "UNAUTHORIZED"} ->
         reply(conn, 401, error(nil, "FORBIDDEN", false))
+
+      {:error, "READ_ONLY"} ->
+        reply(conn, 403, error(nil, "READ_ONLY", false))
 
       {:more, _body, conn} ->
         reply(conn, 413, error(nil, "INVALID_INPUT", false))
@@ -52,6 +56,15 @@ defmodule ToriEconomy.Api do
       # No exception message, SQL text, request body or credential in logs.
       Logger.error("Economy request failed (#{inspect(failure.__struct__)})")
       reply(conn, 503, error(nil, "TEMPORARILY_UNAVAILABLE", true))
+  end
+
+  # A running API is not permission to create a second wallet writer.
+  defp writes_allowed(%{operation: "wallet.balance"}), do: :ok
+
+  defp writes_allowed(_request) do
+    if System.get_env("TORI_ECONOMY_WRITE_ENABLED") == "true",
+      do: :ok,
+      else: {:error, "READ_ONLY"}
   end
 
   defp authorized(conn) do

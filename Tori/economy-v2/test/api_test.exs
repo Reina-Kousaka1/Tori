@@ -37,6 +37,29 @@ defmodule ToriEconomy.ApiTest do
     assert Jason.decode!(response.resp_body)["error"]["code"] == "INVALID_INPUT"
   end
 
+  test "valid mutations are read-only by default" do
+    previous = System.get_env("TORI_ECONOMY_WRITE_ENABLED")
+    System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
+
+    on_exit(fn ->
+      if previous,
+        do: System.put_env("TORI_ECONOMY_WRITE_ENABLED", previous),
+        else: System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
+    end)
+
+    valid = Jason.encode!(%{
+      "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
+      "idempotency_key" => "discord-interaction:123456789012345678",
+      "operation" => "daily.claim",
+      "context" => %{"actor_user_id" => "123", "guild_id" => "234", "channel_id" => "345"},
+      "args" => %{}
+    })
+
+    response = request(valid)
+    assert response.status == 403
+    assert Jason.decode!(response.resp_body)["error"]["code"] == "READ_ONLY"
+  end
+
   defp request(body) do
     conn(:post, "/internal/economy/v1/execute", body)
     |> put_req_header("authorization", "Bearer " <> String.duplicate("s", 32))
