@@ -25,6 +25,7 @@ defmodule ToriEconomy.Equipment do
       # A dress occupies top and bottom visually; conflicting items are removed together.
       slots = Enum.uniq([slot | item.conflict_slots])
       Sql.query!("DELETE FROM economy_v2_loadout WHERE user_id=$1 AND slot=ANY($2::text[])", [user, slots])
+      Sql.query!("DELETE FROM economy_v2_loadout WHERE user_id=$1 AND item_id=$2", [user, item_id])
       Sql.query!("""
       DELETE FROM economy_v2_loadout l USING economy_v2_catalog_items c
       WHERE l.user_id=$1 AND l.item_id=c.item_id AND $2=ANY(c.conflict_slots)

@@ -50,7 +50,8 @@ CREATE TABLE economy_v2_loadout (
     user_id TEXT NOT NULL REFERENCES economy_accounts(user_id) ON DELETE RESTRICT,
     slot TEXT NOT NULL CHECK (slot IN ('top','bottom','dress','outerwear','shoes','bag','accessory','jewelry','hair_accessory')),
     item_id TEXT NOT NULL REFERENCES economy_v2_catalog_items(item_id) ON DELETE RESTRICT,
-    PRIMARY KEY (user_id, slot)
+    PRIMARY KEY (user_id, slot),
+    UNIQUE (user_id, item_id)
 );
 
 CREATE TABLE economy_v2_xp_thresholds (
