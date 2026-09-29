@@ -318,7 +318,8 @@ public final class GeneralBot extends CommandListener {
                     sale.endsAt().getEpochSecond()));
             }
         }
-        if (market != null) text.append("\n").append(Messages.text(language, "market.quote.note"));
+        if (market != null) text.append("\n").append(Messages.text(language,
+            market.readOnly() ? "market.read_only" : "market.quote.note"));
         text.append("\n\n").append(Messages.text(language, "shop.current.footer"));
         return persona.decorate(text.toString(), ToriPersona.Context.SHOP_BROWSE, language);
     }
@@ -328,6 +329,7 @@ public final class GeneralBot extends CommandListener {
         require(option != null, "error.input");
         int count = quantityOption(event);
         if (market != null) {
+            require(!market.readOnly(), "market.read_only");
             var purchase = market.buy(event.getGuild().getId(), userId, event.getId(), option.getAsString(), count, clock.instant());
             return switch (purchase.state()) {
                 case PURCHASED -> Messages.text(language, "shop.purchase", purchase.quantity(),
@@ -512,6 +514,7 @@ public final class GeneralBot extends CommandListener {
     private String marketText(CommandContext event, Language language) throws CurrencyStoreException {
         require(market != null, "economy.unavailable");
         require(event.getMember() != null && event.getMember().hasPermission(Permission.MANAGE_SERVER), "language.permission");
+        require(!market.readOnly(), "market.read_only");
         String action = event.getSubcommandName();
         if ("stock".equals(action)) {
             String id = event.getOption("product_id").getAsString().strip().toLowerCase(Locale.ROOT);
@@ -551,6 +554,7 @@ public final class GeneralBot extends CommandListener {
         String response = Messages.text(language, "market.product.info", product.name(), product.id(),
             product.description(), product.category(), price < 0 ? Messages.text(language, "market.price.unavailable") : price,
             stock);
+        if (market.readOnly()) response += "\n" + Messages.text(language, "market.read_only");
         return persona.decorate(response, ToriPersona.Context.SHOP_BROWSE, language);
     }
 
