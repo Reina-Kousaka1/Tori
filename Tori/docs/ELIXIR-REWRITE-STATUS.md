@@ -25,6 +25,7 @@ flowchart LR
 - `marketplace.browse` reads active user listings. Listing escrows an existing owned item; buying settles global wallet balances, delivers the escrowed item and writes both ledger legs atomically. Seller cancellation returns escrow, including after expiry. Java's existing dynamic market is separate and stays Java-owned.
 - `profile.snapshot` now includes existing fish/mine/chop timestamps and the fashion loadout. It does not pretend that legacy activity rewards are Elixir-owned.
 - Persona has a supervised transient mood process, deterministic seasonal overlay and semantic, neutral-fallback rendering API. Domain outcomes carry presentation keys but no Discord markup. Java commands/presence remain unaffected.
+- `GET /internal/persona/v1/presence` offers a deterministic mood/season-aware suggestion with repetition avoidance in the pure selector. It does not call Discord; Java's scheduler and actual presence remain unchanged.
 
 ## Gates and explicit limitations
 

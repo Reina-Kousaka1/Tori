@@ -5,6 +5,7 @@ defmodule ToriEconomy.Api do
 
   alias ToriEconomy.{Contract, Dispatcher, Persona, Sql, WriteGate}
   alias ToriEconomy.Persona.Mood
+  alias ToriEconomy.Persona.Presence
 
   def init(opts), do: opts
 
@@ -24,6 +25,9 @@ defmodule ToriEconomy.Api do
       {"GET", "/internal/persona/v1/snapshot"} ->
         persona_snapshot(conn)
 
+      {"GET", "/internal/persona/v1/presence"} ->
+        persona_presence(conn)
+
       {"POST", "/internal/persona/v1/events"} ->
         persona_event(conn)
 
@@ -42,6 +46,17 @@ defmodule ToriEconomy.Api do
         reply(conn, 200, %{"identity" => "tori", "mood" => Atom.to_string(state.mood),
                            "intensity" => state.intensity, "season" => Atom.to_string(state.season)})
 
+      _ -> reply(conn, 401, error(nil, "FORBIDDEN", false))
+    end
+  end
+
+  defp persona_presence(conn) do
+    case authorized(conn) do
+      :ok ->
+        state = Persona.snapshot()
+        seed = div(System.system_time(:second), 900)
+        reply(conn, 200, %{"status" => "ok", "suggestion" => Presence.choose(state, seed),
+                           "mood" => Atom.to_string(state.mood), "season" => Atom.to_string(state.season)})
       _ -> reply(conn, 401, error(nil, "FORBIDDEN", false))
     end
   end
