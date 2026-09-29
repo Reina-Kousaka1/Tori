@@ -6,7 +6,7 @@ defmodule ToriEconomy.Contract do
   @max_amount 9_223_372_036_854_775_807
   @mutations ["daily.claim", "wallet.transfer", "shop.purchase", "inventory.equip",
               "inventory.unequip", "progression.grant", "marketplace.list",
-              "marketplace.buy", "marketplace.cancel"]
+              "marketplace.buy", "marketplace.cancel", "activity.perform"]
   @reads ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard", "profile.snapshot",
           "market.product", "market.history", "shop.rotation", "progression.snapshot",
           "marketplace.browse"]
@@ -50,6 +50,11 @@ defmodule ToriEconomy.Contract do
   defp validate_args("shop.rotation", args), do: keys(args, [])
   defp validate_args("progression.snapshot", args), do: keys(args, [])
   defp validate_args("marketplace.browse", args), do: keys(args, [])
+  defp validate_args("activity.perform", args) do
+    with :ok <- keys(args, ["activity"]),
+         activity when activity in ["fish", "mine", "chop"] <- args["activity"], do: :ok
+    else _ -> {:error, "INVALID_INPUT"} end
+  end
 
   defp validate_args("shop.purchase", args) do
     with :ok <- keys(args, ["item_id", "quantity", "period_key"]),

@@ -159,6 +159,10 @@ defmodule ToriEconomy.TestSchema do
       raise "Incomplete Tori test schema: original catalog seed is missing"
     end
 
+    unless SQL.query!(Repo, "SELECT tool_slot,durability FROM economy_v2_catalog_items WHERE item_id='fishing_rod'", []).rows == [["rod", 40]] do
+      raise "Incomplete Tori test schema: legacy activity catalog is missing or incompatible"
+    end
+
     :ok
   end
 end

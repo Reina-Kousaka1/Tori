@@ -1,6 +1,6 @@
 defmodule ToriEconomy.RewriteDomainTest do
   use ExUnit.Case, async: false
-  alias ToriEconomy.{Api, Contract, Equipment, Marketplace, Progression, Shop, Sql, TestSchema, WriteGate}
+  alias ToriEconomy.{Activity, Api, Contract, Equipment, Marketplace, Progression, Shop, Sql, TestSchema, WriteGate}
   alias ToriEconomy.Shop.Rotation
 
   @url System.get_env("TORI_ECONOMY_TEST_DATABASE_URL")
@@ -92,6 +92,7 @@ defmodule ToriEconomy.RewriteDomainTest do
     req = request("progression.grant", user, %{"source_code" => source})
     assert {:ok, first} = Progression.execute(req)
     assert first["result"]["xp"] == "7"
+    assert [[7]] = Sql.query!("SELECT xp FROM economy_v2_career_progress WHERE user_id=$1 AND career_code='ballet'", [user]).rows
     assert {:ok, replay} = Progression.execute(%{req | request_id: Ecto.UUID.generate()})
     assert replay["result"] == first["result"]
     assert {:ok, cooldown} = Progression.execute(request("progression.grant", user, %{"source_code" => source}))
@@ -145,6 +146,42 @@ defmodule ToriEconomy.RewriteDomainTest do
     cancel = request("marketplace.cancel", seller, %{"listing_id" => id})
     assert {:ok, %{"status" => "ok"}} = Marketplace.execute(cancel)
     assert [[1]] = Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='soft_pink_slip_dress'", [seller]).rows
+  end
+
+  test "gather uses existing tool, wallet, inventory and cooldown atomically" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'fishing_rod',1)", [user])
+    Sql.query!("INSERT INTO economy_equipment(user_id,slot,item_id) VALUES ($1,'rod','fishing_rod')", [user])
+    req = request("activity.perform", user, %{"activity" => "fish"})
+    # Two controlled rolls: lowest credit reward and first fish-crate threshold.
+    assert {:ok, first} = Activity.execute(req, fn _ -> 1 end)
+    assert first["result"]["credits"] == "10"
+    assert first["result"]["drop_item_id"] == "fish_crate"
+    assert {:ok, replay} = Activity.execute(%{req | request_id: Ecto.UUID.generate()}, fn _ -> 100 end)
+    assert replay["result"] == first["result"]
+    assert {:ok, cooldown} = Activity.execute(request("activity.perform", user, %{"activity" => "fish"}))
+    assert cooldown["error"]["code"] == "COOLDOWN_ACTIVE"
+    assert [[10]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [user]).rows
+    assert [[1]] = Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='fish_crate'", [user]).rows
+    assert [[1]] = Sql.query!("SELECT count(*) FROM economy_v2_activity_events WHERE request_key=$1", [req.idempotency_key]).rows
+  end
+
+  test "configured activity XP commits with the gather result" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'axe',1)", [user])
+    Sql.query!("INSERT INTO economy_equipment(user_id,slot,item_id) VALUES ($1,'axe','axe')", [user])
+    Sql.query!("""
+      INSERT INTO economy_v2_xp_sources(source_code,reward_xp,cooldown_ms,career_code,active)
+      VALUES ('activity_chop',7,60000,NULL,true)
+      ON CONFLICT (source_code) DO UPDATE SET reward_xp=7,cooldown_ms=60000,career_code=NULL,active=true
+    """)
+    req = request("activity.perform", user, %{"activity" => "chop"})
+    assert {:ok, result} = Activity.execute(req, fn _ -> 1 end)
+    assert result["result"]["xp"]["xp_awarded"] == "7"
+    assert [[7]] = Sql.query!("SELECT xp FROM economy_v2_account_progress WHERE user_id=$1", [user]).rows
+    assert [[1]] = Sql.query!("SELECT count(*) FROM economy_v2_xp_events WHERE request_key=$1", [req.idempotency_key]).rows
   end
 
   defp restore(name, nil), do: System.delete_env(name)

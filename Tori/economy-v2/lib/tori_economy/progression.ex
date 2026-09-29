@@ -27,6 +27,21 @@ defmodule ToriEconomy.Progression do
       skip_persist_errors: ["REQUIREMENT_NOT_MET", "COOLDOWN_ACTIVE"])
   end
 
+  # Called inside an already locked, idempotent activity transaction. No
+  # additional request record is created. Unconfigured sources grant no XP.
+  def activity_effect(request, activity) when activity in ["fish", "mine", "chop"] do
+    source = "activity_" <> activity
+    user = request.context["actor_user_id"]
+    case Sql.query!("SELECT reward_xp,cooldown_ms,career_code FROM economy_v2_xp_sources WHERE source_code=$1 AND active FOR SHARE", [source]).rows do
+      [[reward, cooldown, career]] ->
+        case grant_configured(request, user, source, reward, cooldown, career) do
+          %{"status" => "ok", "result" => result} -> result
+          _ -> nil
+        end
+      [] -> nil
+    end
+  end
+
   defp grant(request) do
     user = request.context["actor_user_id"]
     source = request.args["source_code"]
