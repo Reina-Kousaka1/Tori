@@ -33,12 +33,30 @@ now the additive regular Flyway migration
 `src/main/resources/db/migration/V5__economy_v2_core.sql`; it has not been
 applied to production.
 
+### Daily cooldown semantics (2026-09-29)
+
+Both the legacy Java path and Elixir use the existing `economy_accounts.last_daily_at`
+epoch-millisecond value and the same 86,400,000 ms elapsed-time rule. A
+successful claim awards 150 credits and records the claim instant. A claim is
+allowed at exactly `last_daily_at + 86,400,000`; midnight, calendar dates, and
+server timezone do not participate. An active cooldown returns the remaining
+milliseconds. Elixir rolls back the provisional idempotency row for
+`COOLDOWN_ACTIVE`, so a denied claim leaves the account, cooldown, ledger, and
+request tables unchanged. Successful claims still persist the result, credit,
+timestamp, and ledger row atomically for replay safety. Existing wallet data
+and cooldown timestamps are not reset or migrated. This is code-level parity;
+the new Java/PostgreSQL and Elixir/PostgreSQL tests require their isolated test
+database and have not been run in this workstation.
+
 Verification status for the reported Pi baseline and this workstation's newer
 deployment changes:
 
 | Gate | Result | Evidence / limit |
 | --- | --- | --- |
 | Java clean test/build | NOT RUN (current revision) | Earlier Phase 2/3 baseline passed 250 tests, 0 failures/errors, 6 optional live tests skipped. This workstation's rerun was blocked by `AccessDeniedException` on a Gradle dependency JAR, so the deployment changes are not covered. |
+| Daily cooldown Java boundary check | PARTIAL | Compiled the new Java cooldown helper with `javac`; a direct harness passed five 24-hour, midnight, DST-transition, and empty-timestamp checks. JUnit and the Java/PostgreSQL live test were not run. |
+| Daily cooldown Elixir suite | NOT RUN | `mix`, Erlang, and Docker are unavailable on this workstation; the new ExUnit tests have not been executed. |
+| Daily cooldown PostgreSQL parity | NOT RUN | No test database was contacted in this turn; preservation of `last_daily_at`, no-write cooldown denials, and cross-runtime cutover behavior remain unverified here. |
 | Elixir build and suite (Pi baseline) | PASS (reported) | `mix test`, 21 tests, 0 failures, no DB-related skips on the isolated database. New deployment/gate revision: NOT RUN. |
 | Elixir/PostgreSQL integration (Pi baseline) | PASS (reported) | Only `tori_economy_test` on port 5433 with V1–V4 and draft V5. New revision: NOT RUN. |
 | Docker build / Compose validation | NOT RUN | Docker CLI unavailable on this workstation; Raspberry Pi build still required. |

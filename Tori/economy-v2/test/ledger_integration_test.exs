@@ -166,6 +166,77 @@ defmodule ToriEconomy.LedgerIntegrationTest do
              ).rows
   end
 
+  test "legacy last_daily_at remains authoritative and cooldown denial changes no persisted state" do
+    actor = user_id()
+    interaction = user_id()
+    now = System.system_time(:millisecond)
+    day_ms = ToriEconomy.DailyCooldown.duration_ms()
+    legacy_last_claim = now - (day_ms - 300_000)
+    fixed_updated_at = ~U[2020-01-02 03:04:05Z]
+
+    Sql.query!(
+      """
+      INSERT INTO economy_accounts(user_id, balance, last_daily_at, updated_at)
+      VALUES ($1, $2, $3, $4)
+      """,
+      [actor, 725, legacy_last_claim, fixed_updated_at]
+    )
+
+    before =
+      Sql.query!(
+        "SELECT balance, last_daily_at, updated_at::text FROM economy_accounts WHERE user_id=$1",
+        [actor]
+      ).rows
+
+    daily_request = request("daily.claim", actor, interaction)
+    assert {:ok, denied} = Accounts.execute(daily_request)
+    assert denied["error"]["code"] == "COOLDOWN_ACTIVE"
+    retry_after = denied["error"]["details"]["retry_after_ms"]
+    assert is_integer(retry_after) and retry_after > 0 and retry_after <= 300_000
+
+    after_attempt =
+      Sql.query!(
+        "SELECT balance, last_daily_at, updated_at::text FROM economy_accounts WHERE user_id=$1",
+        [actor]
+      ).rows
+
+    assert after_attempt == before
+    assert [[0]] =
+             Sql.query!(
+               "SELECT count(*) FROM economy_v2_requests WHERE idempotency_key=$1",
+               [daily_request.idempotency_key]
+             ).rows
+
+    assert [[0]] =
+             Sql.query!(
+               "SELECT count(*) FROM economy_v2_ledger_entries WHERE user_id=$1",
+               [actor]
+             ).rows
+  end
+
+  test "claim after an existing legacy 24-hour cooldown awards exactly 150" do
+    actor = user_id()
+    last_claim =
+      System.system_time(:millisecond) - ToriEconomy.DailyCooldown.duration_ms() - 1_000
+
+    Sql.query!(
+      "INSERT INTO economy_accounts(user_id, balance, last_daily_at) VALUES ($1, $2, $3)",
+      [actor, 725, last_claim]
+    )
+
+    assert {:ok, result} = Accounts.execute(request("daily.claim", actor, user_id()))
+    assert result["result"]["credits_awarded"] == "150"
+    assert result["result"]["balance"] == "875"
+
+    assert [[875, stored_last_claim]] =
+             Sql.query!(
+               "SELECT balance, last_daily_at FROM economy_accounts WHERE user_id=$1",
+               [actor]
+             ).rows
+
+    assert stored_last_claim >= last_claim + ToriEconomy.DailyCooldown.duration_ms()
+  end
+
   test "parallel identical daily requests commit exactly once" do
     actor = user_id()
     original = request("daily.claim", actor, user_id())

@@ -13,7 +13,6 @@ import java.util.random.RandomGenerator;
 
 /** PostgreSQL-backed shop/game state. Every balance + inventory mutation is transactional. */
 final class PostgresCurrencyStore implements CurrencyStore {
-    private static final long DAILY_MS = 86_400_000L;
     private static final long ACTIVITY_COOLDOWN_MS = 60_000L;
     private static final long GATHER_COOLDOWN_MS = 60_000L;
     private static final List<String> SLOTS = List.of("rod", "pickaxe", "axe", "wrench");
@@ -46,7 +45,8 @@ final class PostgresCurrencyStore implements CurrencyStore {
             ensureAccount(connection, userId);
             lockedBalance(connection, userId);
             long last = lastAt(connection, userId, "last_daily_at");
-            if (last > 0 && remaining(now, last, DAILY_MS) > 0) return remaining(now, last, DAILY_MS);
+            long wait = DailyCooldown.remainingMillis(now, last);
+            if (wait > 0) return wait;
             credit(connection, userId, 150);
             try (var sql = connection.prepareStatement("UPDATE economy_accounts SET last_daily_at=?, updated_at=? WHERE user_id=?")) {
                 sql.setLong(1, now); PostgresTimestamps.bind(sql, 2, Instant.now());

@@ -1,9 +1,8 @@
 defmodule ToriEconomy.Accounts do
   @moduledoc "Global wallet operations. No guild-keyed wallet is created."
-  alias ToriEconomy.{Idempotency, Sql}
+  alias ToriEconomy.{DailyCooldown, Idempotency, Sql}
 
   @daily_reward 150
-  @daily_ms 86_400_000
   @max_balance 9_223_372_036_854_775_807
 
   def execute(%{operation: "wallet.balance"} = request) do
@@ -30,7 +29,11 @@ defmodule ToriEconomy.Accounts do
   end
 
   def execute(%{operation: "daily.claim"} = request) do
-    Idempotency.run(request, fn -> claim_daily(request) end)
+    Idempotency.run(
+      request,
+      fn -> claim_daily(request) end,
+      skip_persist_errors: ["COOLDOWN_ACTIVE"]
+    )
   end
 
   def execute(%{operation: "wallet.transfer"} = request) do
@@ -50,7 +53,7 @@ defmodule ToriEconomy.Accounts do
       ).rows
 
     now = System.system_time(:millisecond)
-    wait = if last_daily_at > 0, do: max(0, @daily_ms - (now - last_daily_at)), else: 0
+    wait = DailyCooldown.remaining_ms(now, last_daily_at)
 
     cond do
       wait > 0 ->
