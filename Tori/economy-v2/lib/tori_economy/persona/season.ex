@@ -18,4 +18,5 @@ defmodule ToriEconomy.Persona.Season do
   end
 
   def current(%Date{}, event) when event in @events, do: event
+  def current(%Date{} = date, _event), do: current(date, nil)
 end

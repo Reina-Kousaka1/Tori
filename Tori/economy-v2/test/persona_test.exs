@@ -28,6 +28,7 @@ defmodule ToriEconomy.PersonaTest do
     assert Season.current(~D[2026-04-01]) == :spring
     assert Season.current(~D[2026-12-25]) == :christmas
     assert Season.current(~D[2026-07-01], :halloween) == :halloween
+    assert Season.current(~D[2026-07-01], :unrecognized) == :summer
   end
 
   test "persona phrases receive structured values and serious contexts stay factual" do
