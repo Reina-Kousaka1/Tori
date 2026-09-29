@@ -52,8 +52,7 @@ defmodule ToriEconomy.Application do
       if System.get_env("TORI_NOSTRUM_ENABLED") == "true" do
         token = System.fetch_env!("TORI_NOSTRUM_TOKEN")
         Nostrum.Token.check_token!(token)
-        Application.put_env(:nostrum, :token, token)
-        [Nostrum.Application, ToriEconomy.Discord.NostrumConsumer]
+        [ToriEconomy.Discord.PreviewGateway, ToriEconomy.Discord.PreviewCommands]
       else
         []
       end
