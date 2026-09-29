@@ -58,8 +58,10 @@ gate in the Pi guide has been completed.
 - Java: from `Tori`, run `./gradlew clean test build --no-daemon`.
 - Elixir: from `Tori/economy-v2`, run `mix test`.
 - Isolated PostgreSQL tests require `TORI_ECONOMY_TEST_DATABASE_URL` to point
-  to a dedicated database ending in `_test`. Never use production credentials
-  or data for these tests.
+  to a dedicated database ending in `_test`. Under `MIX_ENV=test`, the
+  application starts its Repo from this URL and ignores production database
+  settings; without it, database integration tests are skipped. Never use
+  production credentials or data for these tests.
 - Java-to-Elixir integration tests also require the local test API secret and
   `TORI_ECONOMY_TEST_WRITE_ENABLED=YES`.
 

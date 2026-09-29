@@ -2,32 +2,56 @@ defmodule ToriEconomy.Application do
   @moduledoc "Supervision boundary for the internal economy service. Disabled by default."
   use Application
 
+  @test_environment Mix.env() == :test
+
   @impl true
   def start(_type, _args) do
-    enabled? = System.get_env("TORI_ECONOMY_API_ENABLED") == "true"
-
     children =
-      if enabled? do
-        :ok = ToriEconomy.WriteGate.validate_startup!()
-        secret = System.fetch_env!("TORI_ECONOMY_API_SECRET")
-        if byte_size(secret) < 32,
-          do: raise("TORI_ECONOMY_API_SECRET must have at least 32 bytes")
-
-        port = System.get_env("TORI_ECONOMY_PORT", "4001") |> String.to_integer()
-        bind = System.get_env("TORI_ECONOMY_BIND", "127.0.0.1") |> String.to_charlist()
-        {:ok, ip} = :inet.parse_address(bind)
-
-        Application.put_env(:tori_economy, ToriEconomy.Repo, database_options() ++ [pool_size: 5])
-
-        [
-          ToriEconomy.Repo,
-          {Bandit, plug: ToriEconomy.Api, ip: ip, port: port}
-        ]
-      else
-        []
+      cond do
+        @test_environment -> test_children()
+        System.get_env("TORI_ECONOMY_API_ENABLED") == "true" -> api_children()
+        true -> []
       end
 
     Supervisor.start_link(children, strategy: :one_for_one, name: ToriEconomy.Supervisor)
+  end
+
+  defp test_children do
+    case System.get_env("TORI_ECONOMY_TEST_DATABASE_URL") do
+      url when is_binary(url) and url != "" ->
+        uri = URI.parse(url)
+        database = uri.path && URI.decode(String.trim_leading(uri.path, "/"))
+
+        unless uri.scheme in ["postgres", "postgresql"] and is_binary(uri.host) and
+                 uri.host != "" and is_binary(database) and
+                 String.ends_with?(database, "_test") and not String.contains?(database, "/") do
+          raise "TORI_ECONOMY_TEST_DATABASE_URL must name an isolated PostgreSQL *_test database"
+        end
+
+        Application.put_env(:tori_economy, ToriEconomy.Repo, url: url, pool_size: 10)
+        [ToriEconomy.Repo]
+
+      _ ->
+        []
+    end
+  end
+
+  defp api_children do
+    :ok = ToriEconomy.WriteGate.validate_startup!()
+    secret = System.fetch_env!("TORI_ECONOMY_API_SECRET")
+    if byte_size(secret) < 32,
+      do: raise("TORI_ECONOMY_API_SECRET must have at least 32 bytes")
+
+    port = System.get_env("TORI_ECONOMY_PORT", "4001") |> String.to_integer()
+    bind = System.get_env("TORI_ECONOMY_BIND", "127.0.0.1") |> String.to_charlist()
+    {:ok, ip} = :inet.parse_address(bind)
+
+    Application.put_env(:tori_economy, ToriEconomy.Repo, database_options() ++ [pool_size: 5])
+
+    [
+      ToriEconomy.Repo,
+      {Bandit, plug: ToriEconomy.Api, ip: ip, port: port}
+    ]
   end
 
   defp database_options do
