@@ -1,30 +1,48 @@
 # Economy V2 readiness — 2026-09-29
 
-## Phase 2 + 3 implementation record — 2026-09-29
+## Raspberry Pi test report and current deployment work
 
-`/daily` and the existing `/transfer` command now have opt-in Java routing via
-`TORI_ECONOMY_ROUTING=daily=ELIXIR,transfer=ELIXIR`; omitted areas stay
-`LEGACY`. The Elixir write gate remains read-only unless explicitly enabled,
-and permits writes only when its configured PostgreSQL URL names a `*_test`
-database. The API refuses startup if writes are enabled for any other database.
-Production routes and writes were not enabled.
+The user reported a successful `mix test` on the Raspberry Pi against only the
+isolated `tori_economy_test` database on port 5433. The report says migrations
+V1–V4 plus the then-draft V5 were applied, with 21 tests, 0 failures, and no
+database-related skips. Production PostgreSQL was not contacted. This verifies
+the implementation that was on the Pi at that time; it does not verify the
+subsequent Docker release, regular Flyway promotion, or production write-gate
+changes recorded in the current working tree.
 
-The mutation path reuses the draft V5 tables: `economy_accounts` remains the
-global wallet source, while `economy_v2_requests` stores interaction-keyed
-results and `economy_v2_ledger_entries` stores `DAILY_CLAIM`, `TRANSFER_OUT`,
-and `TRANSFER_IN`. Balance updates, ledger legs, and replay result commit in
-one transaction. Transfers lock both account rows in a stable sorted order.
-No schema was added to Flyway. The reported verification used only the
-isolated test database; production PostgreSQL was not contacted.
+The current uncommitted deployment work adds a Docker Mix release, an internal
+Compose service, a health check, discrete environment-based DB credentials,
+and an additive V5 migration under Java's normal Flyway directory. It also
+adds a production gate that checks the expected connected database, Flyway V5,
+an explicit operator acknowledgement, and a per-operation allowlist. These
+changes have not been executed through Mix or Docker in this workstation and
+must be treated as unverified until those checks run. No production migration
+or production write was run.
 
-Current verification for this implementation (Elixir/PostgreSQL run reported
-from the Raspberry Pi on 2026-09-29):
+`/daily` and the existing `/transfer` command have opt-in Java routing via
+`TORI_ECONOMY_ROUTING=daily=ELIXIR,transfer=ELIXIR`; omitted areas remain
+`LEGACY`. The test write gate verifies the connected database ends in `_test`.
+The default production configuration remains `LEGACY` plus writes disabled.
+
+The mutation path reuses `economy_accounts` for global wallets,
+`economy_v2_requests` for interaction-keyed results, and
+`economy_v2_ledger_entries` for `DAILY_CLAIM`, `TRANSFER_OUT`, and
+`TRANSFER_IN`. Balance updates, ledger legs, and replay results share a DB
+transaction. Transfers lock both account rows in stable sorted order. V5 is
+now the additive regular Flyway migration
+`src/main/resources/db/migration/V5__economy_v2_core.sql`; it has not been
+applied to production.
+
+Verification status for the reported Pi baseline and this workstation's newer
+deployment changes:
 
 | Gate | Result | Evidence / limit |
 | --- | --- | --- |
-| Java clean test/build | PASS | `gradlew clean test build --no-daemon`: 250 tests, 0 failures, 0 errors, 6 optional live tests skipped. |
-| Elixir build and suite | PASS | Raspberry Pi report: `mix test`, 21 tests, 0 failures, and no DB-related skips. |
-| Elixir/PostgreSQL integration | PASS | Used only isolated `tori_economy_test` on port 5433 with existing V1–V4 and draft V5 applied. |
+| Java clean test/build | NOT RUN (current revision) | Earlier Phase 2/3 baseline passed 250 tests, 0 failures/errors, 6 optional live tests skipped. This workstation's rerun was blocked by `AccessDeniedException` on a Gradle dependency JAR, so the deployment changes are not covered. |
+| Elixir build and suite (Pi baseline) | PASS (reported) | `mix test`, 21 tests, 0 failures, no DB-related skips on the isolated database. New deployment/gate revision: NOT RUN. |
+| Elixir/PostgreSQL integration (Pi baseline) | PASS (reported) | Only `tori_economy_test` on port 5433 with V1–V4 and draft V5. New revision: NOT RUN. |
+| Docker build / Compose validation | NOT RUN | Docker CLI unavailable on this workstation; Raspberry Pi build still required. |
+| Current Flyway V5 validation | NOT RUN | V5 is now in the normal Flyway path; the newer migration file has not yet been run against a database in this turn. |
 | Daily replay after Repo restart | PASS | Included in the reported non-skipped PostgreSQL integration suite. |
 | Full Elixir/BEAM service restart replay | NOT RUN | The checked-in test restarts the Repo process; it does not restart the full service runtime. |
 | Parallel/race tests | PASS | Included in the reported non-skipped PostgreSQL integration suite. |
@@ -33,21 +51,23 @@ from the Raspberry Pi on 2026-09-29):
 | Production database contacted | NO | The Pi report confirms the isolated test database was used exclusively. |
 | Production Elixir writes enabled | NO | Java production routes remain `LEGACY`; Elixir writes remain gated to an explicitly enabled `*_test` DB. |
 
-The Pi test results above were reported by the user; they were not rerun from
-this workstation. They clear the previously blocked Elixir/PostgreSQL suite.
-The distinct Java live mutation test remains unverified, and production writer
-cutover remains blocked by shared-database backup/restore and single-writer
-gates.
+The Pi baseline results were reported by the user; they were not rerun from
+this workstation. They clear the earlier Elixir/PostgreSQL test blocker for
+that baseline only. The distinct Java live mutation test remains unverified.
+All production writes remain blocked until the database backup/restore checks
+pass and Java writer ownership is exclusive for the migrated data area.
 
 This is a code and schema audit, not a production-data count. Java retains
 `PostgresCurrencyStore` and `PostgresMarketStore` for legacy-owned areas;
 balance, inventory, shop, leaderboard, daily, and transfer can each be routed
 through `EconomyV2Client`. Every area defaults to LEGACY. Elixir's mutation API
-is read-only unless the explicit test-only write gate is enabled. Runtime must
-use the same Tori PostgreSQL database and existing
+is read-only by default. Test writes require the isolated test gate; production
+writes additionally require explicit cutover acknowledgement and runtime
+schema/database checks. Those checks do not replace verified backups or prove
+there is no other Java writer. Runtime must use the same Tori PostgreSQL database and existing
 `economy_accounts` tables; disposable databases in this document are test-only.
 The wallet key is **Discord user ID only**, never guild ID. IDs are PostgreSQL
-`TEXT` and are carried through the draft V2 schema without numeric conversion.
+`TEXT` and are carried through the V2 schema without numeric conversion.
 
 ## Writer parity
 
@@ -88,8 +108,9 @@ cutover gate. Do not enable V2 writes while Java still writes the same A/I rows.
 
 ## Draft backfill, isolated test only
 
-The additive draft V5 stays in `economy-v2/sql/draft`, outside Java Flyway.
-`backfill_v1_to_v2.sql` copies opening balances, inventory quantities,
+V5 is now `src/main/resources/db/migration/V5__economy_v2_core.sql` and is
+applied by Java Flyway at startup. `backfill_v1_to_v2.sql` remains an isolated
+test-only draft and copies opening balances, inventory quantities,
 daily/beg/work/fish/mine/chop timestamps, equipment, and tool wear. Unique
 opening indexes and `ON CONFLICT DO NOTHING` prevent duplication. Existing
 target values are never overwritten. Source rows are locked and source/target
@@ -97,7 +118,7 @@ counts, sums, and exact values are checked in one transaction; any mismatch
 rolls it back. Preserve the legacy tables until every unsupported operation
 has a verified V2 replacement and a separately approved cutover plan.
 
-On an isolated `tori_test` database, first apply V1–V4 and draft V5, then:
+On an isolated `tori_test` database, first apply V1–V5 through Flyway, then:
 
 ```powershell
 psql -X -v ON_ERROR_STOP=1 -d tori_test -f economy-v2/sql/draft/backfill_v1_to_v2.sql
@@ -135,7 +156,8 @@ The API now uses Bandit 1.12.5 and removes Plug.Cowboy, Cowboy and Cowlib from
 the lockfile. Hex's current advisory page marks Bandit versions below 1.12.5
 affected by two August 2026 advisories; 1.12.5 is the patched boundary.
 `mix hex.audit` reports no advisory or retired packages for the resolved graph.
-The API remains disabled by default and locally bound.
+The API remains disabled by default. In the Pi Compose deployment it binds
+inside the private Compose network and has no host-published port.
 
 Sources: https://hex.pm/packages/bandit/advisories ,
 https://bandit.hexdocs.pm/Bandit.html .
@@ -146,8 +168,9 @@ The following results are from the earlier Phase 1/backfill audit. They are
 historical and do not replace the Phase 2/3 results at the top of this file.
 Those fixture runs used disposable local PostgreSQL 17 containers, not production.
 The Java live suite ran against a fresh `tori_test` database with Flyway V1–V4.
-The backfill fixture used a separate `tori_test` database with draft V5 applied
-manually. The restore target was a third, empty `tori_restore_test` database.
+The earlier backfill fixture used a separate `tori_test` database with V5
+applied manually before it was promoted to Flyway. The restore target was a
+third, empty `tori_restore_test` database.
 
 | Gate | Result | Evidence / limit |
 | --- | --- | --- |
@@ -171,7 +194,8 @@ manually. The restore target was a third, empty `tori_restore_test` database.
 | Replay after BEAM restart | NOT RUN | Same-process replay and Java restart persistence were tested; explicit BEAM restart replay remains to test. |
 | Backup script end-to-end | NOT RUN | Script parsed successfully; host `psql`/`pg_dump`/`pg_restore` were unavailable. Equivalent commands ran inside PostgreSQL container. |
 
-No production write cutover is authorized. `TORI_ECONOMY_WRITE_ENABLED` must
-remain false for production until complete parity, backup/restore and writer
-ownership are demonstrated. The Pi test database result does not verify the
-production database backup/restore or production runtime connection.
+No production write cutover is authorized by these test results. Keep
+`TORI_ECONOMY_WRITE_ENABLED=false` for production until the documented backup
+and restore, schema/data, runtime connection, and writer-ownership checks have
+been completed by the operator. The Pi test database result does not verify
+the production database backup/restore or production runtime connection.

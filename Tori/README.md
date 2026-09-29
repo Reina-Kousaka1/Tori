@@ -383,6 +383,10 @@ The PostgreSQL economy and market integration tests are opt-in. They run only wh
 `TORI_POSTGRES_LIVE_TEST=YES` and `TORI_TEST_DATABASE_URL` names a dedicated database whose path is exactly
 `tori_test`; generated test accounts and products are cleaned up by their unique IDs. Otherwise Gradle skips them.
 
+The Elixir Economy API is a separate internal Compose service using this same `tori_main` PostgreSQL database.
+It has no host-published port, starts read-only, and requires an explicit per-operation production cutover after
+V5 Flyway, backup/restore, and data checks. See [the Raspberry Pi deployment and cutover guide](docs/ECONOMY-API-PI-DEPLOYMENT.md).
+
 The reusable database API is split into Gradle modules: `database-api` (shared contracts),
 `database-jdbc` (bounded async JDBC, HikariCP, prepared statements, transactions and Flyway),
 `database-postgresql`, `database-mysql`, and `database-ferretdb` (Mongo-compatible document operations,

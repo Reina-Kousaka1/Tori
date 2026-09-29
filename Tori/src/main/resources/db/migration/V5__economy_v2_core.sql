@@ -1,6 +1,6 @@
--- DRAFT ONLY: intentionally outside src/main/resources/db/migration.
--- Apply only to an isolated test DB until production backup/restore and cutover gates pass.
--- Existing V1-V4 tables and data are not altered by this migration.
+-- Additive economy-v2 support tables. Existing V1-V4 tables and data are untouched.
+-- Flyway applies this migration during the normal Java bot startup path.
+-- Elixir production writes remain blocked until the documented cutover gates pass.
 CREATE TABLE economy_v2_requests (
     idempotency_key TEXT PRIMARY KEY,
     payload_hash CHAR(64) NOT NULL CHECK (payload_hash ~ '^[0-9a-f]{64}$'),
