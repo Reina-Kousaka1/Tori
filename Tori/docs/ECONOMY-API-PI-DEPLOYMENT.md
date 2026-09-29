@@ -151,6 +151,14 @@ steps transfer ownership of one command at a time. For each command, the Java
 route sends that operation only to Elixir and has no legacy fallback; the API
 allowlist rejects any other production mutation.
 
+The current parity audit still finds Java commands such as `/beg`, `/work`,
+`/loot`, `/grantcredits`, `/gamble`, `/slots`, and shop purchases writing the
+same global wallet table. The running Java bot does not disable those writers
+when `/daily` or `/transfer` is routed. Under the project's strict one-writer
+per wallet-data-area rule, the sample cutover below is **not ready to execute**
+until those Java wallet writers are migrated or disabled and that ownership
+change is verified. The API gate cannot discover other Java writers by itself.
+
 Before cutover, ensure `.env` has:
 
 ```dotenv
