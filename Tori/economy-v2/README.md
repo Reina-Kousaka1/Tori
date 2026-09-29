@@ -12,6 +12,14 @@ can each be routed to the private Elixir API. All areas default to `LEGACY`.
 Elixir returns neutral structured data from existing tables. Java continues to
 render Discord output and resolve item display names. `/stats` currently
 reports runtime/server metrics, not economy data, so it remains Java-owned.
+The API also provides a read-only `profile.snapshot` operation over existing
+wallet, inventory and equipment tables. Java `/profile` has not been routed to
+it, and no unimplemented XP or career values are fabricated.
+
+The Elixir persona foundation contains a supervised, transient global mood,
+deterministic seasonal overlays and semantic response rendering. It is
+presentation-only: no economy decision or Discord command currently depends
+on it. See `../docs/ELIXIR-REWRITE-STATUS.md` for ownership and remaining work.
 
 Routing can be set centrally, for example:
 

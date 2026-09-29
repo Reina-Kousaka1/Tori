@@ -2,6 +2,37 @@ defmodule ToriEconomy.Queries do
   @moduledoc "Read-only queries over Tori's existing economy tables."
   alias ToriEconomy.Sql
 
+  def execute(%{operation: "profile.snapshot"} = request) do
+    user_id = request.context["target_user_id"] || request.context["actor_user_id"]
+
+    balance =
+      case Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [user_id]).rows do
+        [[value]] -> value
+        [] -> 0
+      end
+
+    items =
+      Sql.query!(
+        "SELECT item_id, quantity FROM economy_inventory WHERE user_id=$1 AND quantity>0 ORDER BY item_id",
+        [user_id]
+      ).rows
+      |> Enum.map(fn [item_id, quantity] ->
+        %{"item_id" => item_id, "quantity" => Integer.to_string(quantity)}
+      end)
+
+    equipment =
+      Sql.query!("SELECT slot, item_id FROM economy_equipment WHERE user_id=$1 ORDER BY slot", [user_id]).rows
+      |> Enum.map(fn [slot, item_id] -> %{"slot" => slot, "item_id" => item_id} end)
+
+    ok(request, %{
+      "type" => "profile_snapshot",
+      "user_id" => user_id,
+      "balance" => Integer.to_string(balance),
+      "items" => items,
+      "equipment" => equipment
+    })
+  end
+
   def execute(%{operation: "inventory.list"} = request) do
     user_id = request.context["target_user_id"] || request.context["actor_user_id"]
 

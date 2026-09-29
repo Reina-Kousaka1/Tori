@@ -401,6 +401,7 @@ defmodule ToriEconomy.LedgerIntegrationTest do
 
     Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,0),($2,4821)", [actor, target])
     Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'fish',3)", [target])
+    Sql.query!("INSERT INTO economy_equipment(user_id,slot,item_id) VALUES ($1,'rod','fishing_rod')", [target])
 
     Sql.query!(
       """
@@ -413,6 +414,7 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     )
 
     on_exit(fn ->
+      Sql.query!("DELETE FROM economy_equipment WHERE user_id=$1", [target])
       Sql.query!("DELETE FROM economy_inventory WHERE user_id=$1", [target])
       Sql.query!("DELETE FROM economy_accounts WHERE user_id IN ($1,$2)", [actor, target])
       Sql.query!("DELETE FROM economy_market_products WHERE product_id=$1", [product])
@@ -421,6 +423,11 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     assert {:ok, inventory} = Queries.execute(request("inventory.list", actor, user_id()) |> put_in([:context, "target_user_id"], target))
     assert inventory["result"]["user_id"] == target
     assert inventory["result"]["items"] == [%{"item_id" => "fish", "quantity" => "3"}]
+
+    assert {:ok, profile} = Queries.execute(request("profile.snapshot", actor, user_id()) |> put_in([:context, "target_user_id"], target))
+    assert profile["result"]["balance"] == "4821"
+    assert profile["result"]["items"] == [%{"item_id" => "fish", "quantity" => "3"}]
+    assert profile["result"]["equipment"] == [%{"slot" => "rod", "item_id" => "fishing_rod"}]
 
     assert {:ok, catalog} = Queries.execute(request("shop.catalog", actor, user_id(), %{"category" => "api_test"}))
     assert [%{"product_id" => ^product, "current_price" => "314", "effective_price" => "314", "stock" => "-1", "available" => true}] =
@@ -441,6 +448,7 @@ defmodule ToriEconomy.LedgerIntegrationTest do
 
     for {operation, args} <- [
           {"inventory.list", %{}},
+          {"profile.snapshot", %{}},
           {"shop.catalog", %{"category" => "api_test"}},
           {"wallet.leaderboard", %{"limit" => 100}}
         ] do

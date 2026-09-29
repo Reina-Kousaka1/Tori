@@ -20,6 +20,12 @@ defmodule ToriEconomy.ContractTest do
     assert byte_size(request.fingerprint) == 64
   end
 
+  test "profile snapshot is a read with no mutation key or command-specific arguments" do
+    profile = %{@base | "operation" => "profile.snapshot", "idempotency_key" => nil}
+    assert {:ok, %{operation: "profile.snapshot"}} = Contract.validate(profile)
+    assert {:error, "INVALID_INPUT"} = Contract.validate(put_in(profile, ["args", "level"], 7))
+  end
+
   test "fingerprint ignores field order and tracing request id" do
     assert {:ok, first} = Contract.validate(@base)
     reordered = Map.put(@base, "context", Map.new(Enum.reverse(Map.to_list(@base["context"]))))
