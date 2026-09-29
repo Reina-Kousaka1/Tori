@@ -12,17 +12,74 @@ defmodule ToriEconomy.LedgerIntegrationTest do
       raise "Integration tests require a PostgreSQL database name ending in _test"
     end
 
-    {:ok, repo_pid} = Repo.start_link(url: @url, pool_size: 10)
-    Process.unlink(repo_pid)
+    {repo_pid, started_for_tests?} = ensure_test_repo!(@url)
 
     on_exit(fn ->
-      case Process.whereis(Repo) do
-        pid when is_pid(pid) -> Supervisor.stop(pid)
-        _ -> :ok
+      if started_for_tests? do
+        :ok = Supervisor.terminate_child(ToriEconomy.Supervisor, Repo)
+        :ok = Supervisor.delete_child(ToriEconomy.Supervisor, Repo)
       end
     end)
 
     %{repo_pid: repo_pid}
+  end
+
+  # mix test starts the project application before this setup runs. When the
+  # API is enabled, its supervisor already owns Repo; reuse that process only
+  # after proving it targets this explicitly isolated *_test database. When
+  # the API is disabled, attach a test Repo to the same supervisor so the test
+  # harness, rather than an unlinked process, owns its lifecycle.
+  defp ensure_test_repo!(test_url) do
+    supervisor = Process.whereis(ToriEconomy.Supervisor)
+    unless is_pid(supervisor), do: raise("ToriEconomy application supervisor is not running")
+
+    case Process.whereis(Repo) do
+      pid when is_pid(pid) ->
+        unless repo_is_supervised?(pid) do
+          raise "ToriEconomy.Repo is already running outside ToriEconomy.Supervisor"
+        end
+
+        unless same_test_database?(Repo.config(), test_url) do
+          raise "The application Repo does not target TORI_ECONOMY_TEST_DATABASE_URL"
+        end
+
+        {pid, false}
+
+      nil ->
+        case Supervisor.start_child(supervisor, {Repo, url: test_url, pool_size: 10}) do
+          {:ok, pid} -> {pid, true}
+          {:error, {:already_started, pid}} ->
+            unless repo_is_supervised?(pid) and same_test_database?(Repo.config(), test_url) do
+              raise "ToriEconomy.Repo raced with startup but is not the configured isolated test Repo"
+            end
+
+            {pid, false}
+
+          {:error, reason} ->
+            raise "Could not start the isolated test Repo under ToriEconomy.Supervisor: #{inspect(reason)}"
+        end
+    end
+  end
+
+  defp repo_is_supervised?(pid) do
+    ToriEconomy.Supervisor
+    |> Supervisor.which_children()
+    |> Enum.any?(fn {Repo, child_pid, _type, _modules} -> child_pid == pid; _ -> false end)
+  end
+
+  defp same_test_database?(repo_config, test_url) do
+    configured_url = Keyword.get(repo_config, :url)
+
+    with true <- is_binary(configured_url),
+         %URI{} = configured <- URI.parse(configured_url),
+         %URI{} = expected <- URI.parse(test_url),
+         true <- String.ends_with?(configured.path || "", "_test"),
+         true <- String.ends_with?(expected.path || "", "_test") do
+      Enum.map([configured, expected], &{&1.scheme, &1.host, &1.port, &1.userinfo, &1.path, &1.query})
+      |> then(fn [actual, requested] -> actual == requested end)
+    else
+      _ -> false
+    end
   end
 
   defp user_id do
@@ -138,9 +195,10 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     actor = user_id()
     original = request("daily.claim", actor, user_id())
     assert {:ok, first} = Accounts.execute(original)
-    assert Supervisor.stop(old_repo) == :ok
-    {:ok, new_repo} = Repo.start_link(url: @url, pool_size: 10)
-    Process.unlink(new_repo)
+    assert Process.alive?(old_repo)
+    assert :ok = Supervisor.terminate_child(ToriEconomy.Supervisor, Repo)
+    assert {:ok, new_repo} = Supervisor.restart_child(ToriEconomy.Supervisor, Repo)
+    assert new_repo != old_repo
 
     assert {:ok, replay} = Accounts.execute(%{original | request_id: request_id()})
     assert replay["result"] == first["result"]
