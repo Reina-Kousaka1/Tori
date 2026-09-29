@@ -1,8 +1,12 @@
-# Economy V2 readiness — 2026-09-28
+# Economy V2 readiness — 2026-09-29
 
 This is a code and schema audit, not a production-data count. The Java bot still
 routes all economy commands to `PostgresCurrencyStore` and `PostgresMarketStore`.
-`EconomyV2Client` is not wired into `Main`; the Elixir API is disabled by default.
+`/balance` can be routed through the Java `EconomyV2Client` to Elixir by an
+explicit setting; the default remains the legacy Java read. Elixir is disabled
+by default and its mutation API is read-only unless an explicit write gate is
+enabled. Runtime must use the same Tori PostgreSQL database and existing
+`economy_accounts` tables; disposable databases in this document are test-only.
 The wallet key is **Discord user ID only**, never guild ID. IDs are PostgreSQL
 `TEXT` and are carried through the draft V2 schema without numeric conversion.
 
@@ -86,22 +90,16 @@ The script **does not create** the target database. The operator must create
 an empty, separate target and check its name first. A successful isolated
 fixture restore is not evidence that a production backup has been tested.
 
-## Cowlib
+## HTTP dependency security
 
-`plug_cowboy 2.9.0` → `cowboy 2.19.0` → `cowlib 2.20.0` (mix.lock).
-`mix deps.get` reports CVE-2026-43966 (medium, structured response header
-splitting) and CVE-2026-43969 (low, client-side cookie header injection).
-As of this audit Hex lists 2.20.0 as the latest release and still flags both.
-There is no compatible **released, advisory-free** Cowlib version to select.
-The API emits JSON and does not construct untrusted structured headers or
-client Cookie headers; this lowers direct exposure but is not a dependency
-fix. Cowboy 2.19.0 also validates outgoing CR/LF headers by default.
-Keep `TORI_ECONOMY_API_ENABLED=false` outside isolated testing and keep the
-bind address local. Recheck upstream advisories before any network exposure.
+The API now uses Bandit 1.12.5 and removes Plug.Cowboy, Cowboy and Cowlib from
+the lockfile. Hex's current advisory page marks Bandit versions below 1.12.5
+affected by two August 2026 advisories; 1.12.5 is the patched boundary.
+`mix hex.audit` reports no advisory or retired packages for the resolved graph.
+The API remains disabled by default and locally bound.
 
-Sources: https://hex.pm/packages/cowlib/advisories ,
-https://cna.erlef.org/cves/CVE-2026-43966.html ,
-https://cna.erlef.org/cves/CVE-2026-43969.html .
+Sources: https://hex.pm/packages/bandit/advisories ,
+https://bandit.hexdocs.pm/Bandit.html .
 
 ## Verification record
 
@@ -112,9 +110,9 @@ manually. The restore target was a third, empty `tori_restore_test` database.
 
 | Gate | Result | Evidence / limit |
 | --- | --- | --- |
-| Java build | PASS | `gradlew clean test build`; 240 tests, 0 failures, 0 skipped with live opt-in. |
-| Elixir build | PASS | `mix compile` in Elixir 1.18 container. |
-| API validation | PASS | Contract and Plug HTTP tests for malformed input, numeric Snowflakes and authorization. |
+| Java build | PASS | `gradlew clean test build`; 246 tests, 0 failures, 0 errors, 6 optional live tests skipped. |
+| Elixir build | PASS | `mix compile` in Elixir 1.18 container using Bandit 1.12.5. |
+| API validation | PASS | 13 ExUnit tests, 0 failures; includes malformed input, auth and read-only gate. |
 | Idempotency | PASS | Replayed daily request and eight parallel identical requests produced one ledger leg. |
 | Concurrency | PASS | Parallel insufficient-funds and opposing-transfer tests; balances and ledger checked. |
 | Parity audit | PASS | Java command/store/helper and V1–V4 schema mapping above; V2 feature parity itself remains incomplete. |
@@ -123,11 +121,15 @@ manually. The restore target was a third, empty `tori_restore_test` database.
 | Backup | PASS (fixture) | `pg_dump -Fc` completed on the isolated Java test DB. Production backup: BLOCKED (no approved production DB access used). |
 | Restore verification | PASS (fixture) | `pg_restore --exit-on-error` into a separate DB; schema/Flyway hash, wallets, inventory, tickets, orders and moderation-case aggregates matched. Production restore: BLOCKED. |
 | Market READ_ONLY gate | PASS (isolated live test) | Browsing returned current price while direct mutators rejected; scheduler is not started in READ_ONLY. |
-| Cowlib security | BLOCKED | Latest published Cowlib 2.20.0 still reports CVE-2026-43966/43969; no safe release verified. |
+| HTTP dependency security | PASS | Cowlib/Cowboy removed; `mix hex.audit` reports no advisory or retired packages. Bandit pinned via lock to patched 1.12.5. |
+| Java → Elixir balance | PASS (isolated integration) | Real Java HTTP client read the known 4,821 balance through Bandit and existing `economy_accounts` table after service start and restart. Production database was not contacted. |
+| Elixir mutation gate | PASS | Plug-level test confirms valid mutation returns HTTP 403 `READ_ONLY` by default. |
+| Java client timeout/unavailable/schema | PASS | Unit tests cover timeout, unavailable server and malformed response; unrelated ping remains functional. |
+| Shared runtime database | NOT RUN | Actual Tori DB credentials/availability were not provided or used in this turn; same database URL is required by runtime config/docs. |
 | DB integrity | PASS (fixture) | Backfill exact comparison and restore aggregate comparison. Production DB integrity: NOT RUN. |
 | Replay after BEAM restart | NOT RUN | Same-process replay and Java restart persistence were tested; explicit BEAM restart replay remains to test. |
 | Backup script end-to-end | NOT RUN | Script parsed successfully; host `psql`/`pg_dump`/`pg_restore` were unavailable. Equivalent commands ran inside PostgreSQL container. |
 
-No production write cutover is authorized. `TORI_ECONOMY_API_ENABLED` must remain
-false outside the isolated suite. Cowlib advisories and missing V2 parity remain
-release blockers even though the build/test gates above pass.
+No production write cutover is authorized. `TORI_ECONOMY_WRITE_ENABLED` must
+remain false until complete parity and writer ownership are demonstrated.
+Actual Tori database backup/restore and runtime connection remain blockers.
