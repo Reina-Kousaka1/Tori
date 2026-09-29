@@ -1,72 +1,12 @@
 defmodule ToriEconomy.LedgerIntegrationTest do
   use ExUnit.Case, async: false
-  alias ToriEconomy.{Accounts, Api, Queries, Repo, Sql}
+  alias ToriEconomy.{Accounts, Api, Queries, Repo, Sql, TestSchema}
 
   @url System.get_env("TORI_ECONOMY_TEST_DATABASE_URL")
   @moduletag skip: if(is_nil(@url), do: "set TORI_ECONOMY_TEST_DATABASE_URL to an isolated *_test database", else: false)
 
   setup_all do
-    uri = URI.parse(@url)
-
-    unless uri.scheme in ["postgres", "postgresql"] and String.ends_with?(uri.path || "", "_test") do
-      raise "Integration tests require a PostgreSQL database name ending in _test"
-    end
-
-    repo_pid = ensure_test_repo!(@url)
-
-    expected_database = uri.path |> String.trim_leading("/") |> URI.decode()
-
-    unless Sql.query!("SELECT current_database()", []).rows == [[expected_database]] do
-      raise "The application Repo is not connected to TORI_ECONOMY_TEST_DATABASE_URL"
-    end
-
-    %{repo_pid: repo_pid}
-  end
-
-  # mix test starts the application and its Repo before setup_all. Ecto expands
-  # :url into connection fields, so Repo.config() does not retain the URL key.
-  defp ensure_test_repo!(test_url) do
-    supervisor = Process.whereis(ToriEconomy.Supervisor)
-    unless is_pid(supervisor), do: raise("ToriEconomy application supervisor is not running")
-
-    pid = Process.whereis(Repo)
-    unless is_pid(pid), do: raise("The application did not start its isolated test Repo")
-    unless repo_is_supervised?(pid), do: raise("ToriEconomy.Repo is not owned by ToriEconomy.Supervisor")
-
-    case repo_config_mismatch(Repo.config(), test_url) do
-      nil -> pid
-      field -> raise "The application Repo differs from TORI_ECONOMY_TEST_DATABASE_URL in #{field}"
-    end
-  end
-
-  defp repo_is_supervised?(pid) do
-    ToriEconomy.Supervisor
-    |> Supervisor.which_children()
-    |> Enum.any?(fn {Repo, child_pid, _type, _modules} -> child_pid == pid; _ -> false end)
-  end
-
-  defp repo_config_mismatch(repo_config, test_url) do
-    uri = URI.parse(test_url)
-
-    {username, password} =
-      case uri.userinfo && String.split(uri.userinfo, ":", parts: 2) do
-        [user, pass] -> {URI.decode(user), URI.decode(pass)}
-        [user] -> {URI.decode(user), nil}
-        nil -> {nil, nil}
-      end
-
-    expected = [
-      scheme: uri.scheme,
-      hostname: uri.host,
-      port: uri.port,
-      database: uri.path |> String.trim_leading("/") |> URI.decode(),
-      username: username,
-      password: password
-    ]
-
-    Enum.find_value(expected, fn {field, value} ->
-      if Keyword.get(repo_config, field) == value, do: nil, else: field
-    end)
+    %{repo_pid: TestSchema.ensure_target!(@url)}
   end
 
   defp user_id do
@@ -113,14 +53,14 @@ defmodule ToriEconomy.LedgerIntegrationTest do
   end
 
   test "the application Repo uses the configured isolated test database" do
-    assert repo_config_mismatch(Repo.config(), @url) == nil
+    assert TestSchema.config_mismatch(Repo.config(), @url) == nil
 
     expected_database = @url |> URI.parse() |> Map.fetch!(:path) |> String.trim_leading("/") |> URI.decode()
     assert [[^expected_database]] = Sql.query!("SELECT current_database()", []).rows
   end
 
   test "the Repo guard detects a different configured database" do
-    assert repo_config_mismatch(Keyword.put(Repo.config(), :database, "other_database"), @url) ==
+    assert TestSchema.config_mismatch(Keyword.put(Repo.config(), :database, "other_database"), @url) ==
              :database
   end
 
