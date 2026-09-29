@@ -5,7 +5,7 @@ defmodule ToriEconomy.Contract do
   @uuid ~r/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
   @max_amount 9_223_372_036_854_775_807
   @mutations ["daily.claim", "wallet.transfer"]
-  @reads ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard"]
+  @reads ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard", "profile.snapshot"]
   @operations @mutations ++ @reads
 
   def validate(raw) when is_map(raw) do
@@ -42,6 +42,7 @@ defmodule ToriEconomy.Contract do
   defp validate_args("wallet.balance", args), do: keys(args, [])
   defp validate_args("daily.claim", args), do: keys(args, [])
   defp validate_args("inventory.list", args), do: keys(args, [])
+  defp validate_args("profile.snapshot", args), do: keys(args, [])
 
   defp validate_args("shop.catalog", args) do
     with :ok <- keys(args, ["category"]),
