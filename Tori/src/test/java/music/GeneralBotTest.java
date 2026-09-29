@@ -58,8 +58,10 @@ class GeneralBotTest {
             case "balance" -> 99L;
             default -> throw unexpected(method);
         });
+        java.nio.file.Files.writeString(directory.resolve(".env"), "TORI_ECONOMY_ROUTING=balance=ELIXIR\n");
         var fixture = new Fixture();
-        try (var bot = bot(new StatusRotation()).withCurrency(currency).withEconomyV2Balance(client)) {
+        try (var bot = bot(new StatusRotation()).withCurrency(currency)
+                .withEconomyRouting(BotConfig.load(directory).economyRouting()).withEconomyV2Balance(client)) {
             var error = assertThrows(UserError.class,
                 () -> bot.handle(fixture.event("balance", CALLER), Language.EN));
             assertEquals("economy.unavailable", error.getMessage());

@@ -3,7 +3,7 @@ defmodule ToriEconomy.Api do
   import Plug.Conn
   require Logger
 
-  alias ToriEconomy.{Accounts, Contract, Sql}
+  alias ToriEconomy.{Accounts, Contract, Queries, Sql}
 
   def init(opts), do: opts
 
@@ -32,7 +32,7 @@ defmodule ToriEconomy.Api do
          {:ok, raw} <- Jason.decode(body),
          {:ok, request} <- Contract.validate(raw),
          :ok <- writes_allowed(request),
-         {:ok, response} <- Accounts.execute(request) do
+         {:ok, response} <- execute_request(request) do
       code = if get_in(response, ["error", "code"]) == "IDEMPOTENCY_CONFLICT", do: 409, else: 200
       reply(conn, code, response)
     else
@@ -59,13 +59,21 @@ defmodule ToriEconomy.Api do
   end
 
   # A running API is not permission to create a second wallet writer.
-  defp writes_allowed(%{operation: "wallet.balance"}), do: :ok
+  defp writes_allowed(%{operation: operation})
+       when operation in ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard"],
+       do: :ok
 
   defp writes_allowed(_request) do
     if System.get_env("TORI_ECONOMY_WRITE_ENABLED") == "true",
       do: :ok,
       else: {:error, "READ_ONLY"}
   end
+
+  defp execute_request(%{operation: operation} = request)
+       when operation in ["inventory.list", "shop.catalog", "wallet.leaderboard"],
+       do: Queries.execute(request)
+
+  defp execute_request(request), do: Accounts.execute(request)
 
   defp authorized(conn) do
     expected = System.fetch_env!("TORI_ECONOMY_API_SECRET")

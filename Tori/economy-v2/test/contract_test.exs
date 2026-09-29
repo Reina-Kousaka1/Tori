@@ -60,4 +60,20 @@ defmodule ToriEconomy.ContractTest do
     balance = @base |> Map.put("operation", "wallet.balance") |> Map.delete("idempotency_key")
     assert {:ok, _} = Contract.validate(balance)
   end
+
+  test "inventory, catalog and leaderboard reads validate bounded arguments without idempotency keys" do
+    for {operation, args} <- [
+          {"inventory.list", %{}},
+          {"shop.catalog", %{"category" => "tools"}},
+          {"wallet.leaderboard", %{"limit" => 100}}
+        ] do
+      request = @base |> Map.put("operation", operation) |> Map.put("args", args) |> Map.delete("idempotency_key")
+      assert {:ok, _} = Contract.validate(request)
+    end
+
+    invalid_limit = @base |> Map.put("operation", "wallet.leaderboard") |> Map.put("args", %{"limit" => 101}) |> Map.delete("idempotency_key")
+    invalid_category = @base |> Map.put("operation", "shop.catalog") |> Map.put("args", %{"category" => "Tools/All"}) |> Map.delete("idempotency_key")
+    assert {:error, "INVALID_INPUT"} = Contract.validate(invalid_limit)
+    assert {:error, "INVALID_INPUT"} = Contract.validate(invalid_category)
+  end
 end

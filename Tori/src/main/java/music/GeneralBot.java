@@ -36,6 +36,7 @@ public final class GeneralBot extends CommandListener {
     private BotStore statsStore;
     private CurrencyStore currency;
     private EconomyV2Client economyV2Balance;
+    private EconomyRouting economyRouting = EconomyRouting.legacy();
     private PostgresMarketStore market;
     private ToriPersona persona = ToriPersona.defaults();
     private String creator;
@@ -44,6 +45,7 @@ public final class GeneralBot extends CommandListener {
     GeneralBot withPersona(ToriPersona persona) { this.persona = Objects.requireNonNull(persona); return this; }
     GeneralBot withCurrency(CurrencyStore currency) { this.currency = Objects.requireNonNull(currency); return this; }
     GeneralBot withEconomyV2Balance(EconomyV2Client client) { this.economyV2Balance = Objects.requireNonNull(client); return this; }
+    GeneralBot withEconomyRouting(EconomyRouting routing) { this.economyRouting = Objects.requireNonNull(routing); return this; }
     GeneralBot withMarket(PostgresMarketStore market) { this.market = Objects.requireNonNull(market); return this; }
     GeneralBot withShutdown(Runnable shutdown) { this.shutdown = Objects.requireNonNull(shutdown); return this; }
     GeneralBot withStats(BotStore store, String creator) {
@@ -258,18 +260,12 @@ public final class GeneralBot extends CommandListener {
                     var selected = event.getOption("user");
                     var user = selected == null ? event.getUser() : selected.getAsUser();
                     long balance;
-                    if (economyV2Balance == null) {
+                    if (economyRouting.source("balance") == EconomyRouting.Source.LEGACY) {
                         balance = currency.balance(user.getId());
                     } else {
-                        try {
-                            balance = economyV2Balance.balance(userId, event.getGuild().getId(),
-                                event.getChannel().getId(), user.getId());
-                        } catch (InterruptedException ex) {
-                            Thread.currentThread().interrupt();
-                            throw new UserError("economy.unavailable");
-                        } catch (IOException | IllegalArgumentException ex) {
-                            throw new UserError("economy.unavailable");
-                        }
+                        require(economyV2Balance != null, "economy.unavailable");
+                        balance = economyRead(() -> economyV2Balance.balance(userId, event.getGuild().getId(),
+                            event.getChannel().getId(), user.getId()));
                     }
                     yield Messages.text(language, "balance.result", user.getEffectiveName(), balance);
                 }
@@ -286,7 +282,7 @@ public final class GeneralBot extends CommandListener {
                 case "loot" -> lootText(language, userId);
                 case "transfer" -> transferText(event, language, userId);
                 case "gamble", "slots" -> wagerText(event, language, userId);
-                case "leaderboard" -> leaderboardText(language);
+                case "leaderboard" -> leaderboardText(event, language);
                 case "grantcredits" -> grantCreditsText(event, language, userId);
                 case "grantitem" -> grantItemText(event, language, userId);
                 case "shop" -> shopText(event, language);
@@ -315,7 +311,25 @@ public final class GeneralBot extends CommandListener {
         require(category.equals("all") || category.matches("[a-z0-9_-]{1,64}"), "shop.category");
         Instant now = clock.instant();
         var text = new StringBuilder(Messages.text(language, "shop.current.title"));
-        if (market == null) {
+        if (economyRouting.source("shop") == EconomyRouting.Source.ELIXIR) {
+            require(economyV2Balance != null, "economy.unavailable");
+            var catalog = economyRead(() -> economyV2Balance.shopCatalog(event.getUser().getId(),
+                event.getGuild().getId(), event.getChannel().getId(), category));
+            var available = catalog.products().stream().filter(EconomyV2Client.Product::available).toList();
+            for (var product : available.stream().limit(7).toList()) {
+                long price = market == null ? product.effectivePrice()
+                    : market.quote(event.getGuild().getId(), event.getUser().getId(), product.id(), now);
+                text.append("\n`").append(product.id()).append("` — **").append(product.name()).append("** — ")
+                    .append(price < 0 ? Messages.text(language, "market.price.unavailable") : price + " credits");
+            }
+            if (available.isEmpty()) text.append("\n").append(Messages.text(language, "market.products.empty"));
+            if (available.size() > 7) text.append("\n").append(Messages.text(language, "market.products.more", available.size() - 7));
+            for (var sale : catalog.sales()) {
+                String target = sale.productId() == null ? sale.category() : sale.productId();
+                text.append("\n").append(Messages.text(language, "market.sales.active", sale.discountPercent(), target,
+                    sale.endsAtEpoch()));
+            }
+        } else if (market == null) {
             for (var item : currency.shop())
                 text.append("\n`").append(item.id()).append("` — **").append(item.name()).append("** - ")
                     .append(item.price()).append(" credits (sell ").append(item.sellPrice()).append(')');
@@ -373,7 +387,14 @@ public final class GeneralBot extends CommandListener {
     private String inventoryText(CommandContext event, Language language, String userId) throws CurrencyStoreException {
         var selected = event.getOption("user");
         var owner = selected == null ? event.getUser() : selected.getAsUser();
-        var items = currency.inventory(owner.getId());
+        var items = economyRouting.source("inventory") == EconomyRouting.Source.ELIXIR
+            ? economyRead(() -> {
+                require(economyV2Balance != null, "economy.unavailable");
+                return economyV2Balance.inventory(userId, event.getGuild().getId(),
+                    event.getChannel().getId(), owner.getId()).items().stream()
+                    .map(item -> new CurrencyStore.InventoryItem(item.itemId(), item.quantity())).toList();
+            })
+            : currency.inventory(owner.getId());
         if (items.isEmpty()) return Messages.text(language, "inventory.empty", owner.getEffectiveName());
         String content = String.join(", ", items.stream().map(item -> {
             var catalog = ShopCatalog.find(item.id());
@@ -447,14 +468,34 @@ public final class GeneralBot extends CommandListener {
         return persona.decorate(result, ToriPersona.Context.SOCIAL_FUN, language);
     }
 
-    private String leaderboardText(Language language) throws CurrencyStoreException {
-        var ranks = currency.leaderboard(10);
+    private String leaderboardText(CommandContext event, Language language) throws CurrencyStoreException {
+        var ranks = economyRouting.source("leaderboard") == EconomyRouting.Source.ELIXIR
+            ? economyRead(() -> {
+                require(economyV2Balance != null, "economy.unavailable");
+                return economyV2Balance.leaderboard(event.getUser().getId(), event.getGuild().getId(),
+                    event.getChannel().getId(), 10);
+            }).stream()
+                .map(entry -> new CurrencyStore.Rank(entry.userId(), entry.balance())).toList()
+            : currency.leaderboard(10);
         if (ranks.isEmpty()) return Messages.text(language, "leaderboard.empty");
         var lines = new StringBuilder(Messages.text(language, "leaderboard.title"));
         for (int index = 0; index < ranks.size(); index++)
             lines.append("\n").append(index + 1).append(". <@").append(ranks.get(index).userId())
                 .append("> — ").append(ranks.get(index).balance()).append(" credits");
         return lines.toString();
+    }
+
+    @FunctionalInterface
+    private interface EconomyRead<T> { T run() throws IOException, InterruptedException; }
+
+    private static <T> T economyRead(EconomyRead<T> action) throws CurrencyStoreException {
+        try { return action.run(); }
+        catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new CurrencyStoreException(ex);
+        } catch (IOException | IllegalArgumentException ex) {
+            throw new CurrencyStoreException(ex);
+        }
     }
 
     private String grantCreditsText(CommandContext event, Language language, String userId) throws CurrencyStoreException {

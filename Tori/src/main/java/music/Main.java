@@ -133,8 +133,10 @@ public final class Main implements AutoCloseable {
             .withPersona(new ToriPersona(ToriPersonaConfig.load(config))).withShutdown(this::requestShutdown);
         if (store instanceof PostgresBotStore postgres) {
             general.withCurrency(new PostgresCurrencyStore(postgres.database()));
-            EconomyV2Client balanceClient = config.economyV2BalanceClient();
-            if (balanceClient != null) general.withEconomyV2Balance(balanceClient);
+            EconomyRouting economyRouting = config.economyRouting();
+            general.withEconomyRouting(economyRouting);
+            EconomyV2Client economyClient = config.economyV2Client(economyRouting);
+            if (economyClient != null) general.withEconomyV2Balance(economyClient);
             MarketMode marketMode = MarketMode.parse(config.get("TORI_MARKET_MODE", "LEGACY"));
             var market = new PostgresMarketStore(postgres.database(),
                 () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble(), marketMode);

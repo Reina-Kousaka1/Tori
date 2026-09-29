@@ -12,9 +12,11 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.List;
+import java.util.ArrayList;
 
 /**
- * Private economy API client. Only balance reads are wired to Discord behind an
+ * Private economy API client. Read paths are individually routed behind an
  * explicit opt-in; mutations are retained for isolated contract tests.
  */
 public final class EconomyV2Client {
@@ -73,6 +75,18 @@ public final class EconomyV2Client {
         }
     }
 
+    public record InventoryItem(String itemId, long quantity) {}
+    public record Inventory(String userId, List<InventoryItem> items) {
+        public Inventory { items = List.copyOf(items); }
+    }
+    public record Product(String id, String name, String description, String category, long currentPrice,
+                         long effectivePrice, long stock, boolean available, String rarity) {}
+    public record Sale(String productId, String category, int discountPercent, long endsAtEpoch) {}
+    public record ShopCatalog(List<Product> products, List<Sale> sales) {
+        public ShopCatalog { products = List.copyOf(products); sales = List.copyOf(sales); }
+    }
+    public record LeaderboardEntry(String userId, long balance) {}
+
     public Response execute(Request request) throws IOException, InterruptedException {
         Map<String, Object> payload = new java.util.LinkedHashMap<>();
         payload.put("request_id", request.requestId());
@@ -103,24 +117,120 @@ public final class EconomyV2Client {
 
     public long balance(String actorId, String guildId, String channelId, String targetId)
             throws IOException, InterruptedException {
-        Request request = new Request(UUID.randomUUID().toString(), null, "wallet.balance",
-                Map.of("actor_user_id", actorId, "guild_id", guildId,
-                        "channel_id", channelId, "target_user_id", targetId), Map.of());
+        Request request = readRequest("wallet.balance", actorId, guildId, channelId, targetId, Map.of());
+        return decimal(readResult(request, "wallet_balance", targetId).path("balance"), "balance");
+    }
+
+    public Inventory inventory(String actorId, String guildId, String channelId, String targetId)
+            throws IOException, InterruptedException {
+        Request request = readRequest("inventory.list", actorId, guildId, channelId, targetId, Map.of());
+        JsonNode result = readResult(request, "inventory", targetId);
+        JsonNode items = result.path("items");
+        if (!items.isArray()) throw new IOException("Invalid economy inventory response");
+        var parsed = new ArrayList<InventoryItem>();
+        for (JsonNode item : items) {
+            String id = text(item, "item_id");
+            parsed.add(new InventoryItem(id, decimal(item.path("quantity"), "quantity")));
+        }
+        return new Inventory(text(result, "user_id"), parsed);
+    }
+
+    public ShopCatalog shopCatalog(String actorId, String guildId, String channelId, String category)
+            throws IOException, InterruptedException {
+        Request request = readRequest("shop.catalog", actorId, guildId, channelId, null,
+                Map.of("category", category));
+        JsonNode result = readResult(request, "shop_catalog", null);
+        JsonNode products = result.path("products");
+        JsonNode sales = result.path("sales");
+        if (!products.isArray() || !sales.isArray()) throw new IOException("Invalid economy catalog response");
+        var parsedProducts = new ArrayList<Product>();
+        for (JsonNode product : products) {
+            parsedProducts.add(new Product(text(product, "product_id"), text(product, "name"),
+                    text(product, "description"), text(product, "category"),
+                    decimal(product.path("current_price"), "current_price"),
+                    decimal(product.path("effective_price"), "effective_price"),
+                    signedDecimal(product.path("stock"), "stock"), bool(product, "available"),
+                    text(product, "rarity")));
+        }
+        var parsedSales = new ArrayList<Sale>();
+        for (JsonNode sale : sales) {
+            JsonNode productId = sale.path("product_id");
+            JsonNode productCategory = sale.path("category");
+            if (!(productId.isNull() || productId.isTextual()) ||
+                    !(productCategory.isNull() || productCategory.isTextual()))
+                throw new IOException("Invalid economy sale response");
+            parsedSales.add(new Sale(productId.isNull() ? null : productId.asText(),
+                    productCategory.isNull() ? null : productCategory.asText(),
+                    integer(sale.path("discount_percent"), "discount_percent"),
+                    decimal(sale.path("ends_at_epoch"), "ends_at_epoch")));
+        }
+        return new ShopCatalog(parsedProducts, parsedSales);
+    }
+
+    public List<LeaderboardEntry> leaderboard(String actorId, String guildId, String channelId, int limit)
+            throws IOException, InterruptedException {
+        Request request = readRequest("wallet.leaderboard", actorId, guildId, channelId, null,
+                Map.of("limit", limit));
+        JsonNode entries = readResult(request, "leaderboard", null).path("entries");
+        if (!entries.isArray()) throw new IOException("Invalid economy leaderboard response");
+        var result = new ArrayList<LeaderboardEntry>();
+        for (JsonNode entry : entries)
+            result.add(new LeaderboardEntry(text(entry, "user_id"), decimal(entry.path("balance"), "balance")));
+        return List.copyOf(result);
+    }
+
+    private Request readRequest(String operation, String actorId, String guildId, String channelId,
+                                String targetId, Map<String, Object> args) {
+        var context = new java.util.LinkedHashMap<String, String>();
+        context.put("actor_user_id", actorId);
+        context.put("guild_id", guildId);
+        context.put("channel_id", channelId);
+        if (targetId != null) context.put("target_user_id", targetId);
+        return new Request(UUID.randomUUID().toString(), null, operation, context, args);
+    }
+
+    private JsonNode readResult(Request request, String type, String expectedUserId)
+            throws IOException, InterruptedException {
         Response response = execute(request);
         JsonNode body = response.body();
         JsonNode result = body.path("result");
-        JsonNode amount = result.path("balance");
         if (response.httpStatus() != 200 || !"ok".equals(body.path("status").asText()) ||
                 !request.requestId().equals(body.path("request_id").asText()) ||
-                !"wallet_balance".equals(result.path("type").asText()) ||
-                !targetId.equals(result.path("user_id").asText()) || !amount.isTextual() ||
-                !amount.asText().matches("0|[1-9][0-9]*")) {
-            throw new IOException("Invalid economy balance response");
-        }
-        try {
-            return Long.parseLong(amount.asText());
-        } catch (NumberFormatException ex) {
-            throw new IOException("Economy balance is out of range", ex);
-        }
+                !type.equals(result.path("type").asText()) ||
+                expectedUserId != null && !expectedUserId.equals(result.path("user_id").asText()))
+            throw new IOException("Invalid economy " + type + " response");
+        return result;
+    }
+
+    private static String text(JsonNode object, String field) throws IOException {
+        JsonNode value = object.path(field);
+        if (!value.isTextual()) throw new IOException("Invalid economy response field: " + field);
+        return value.asText();
+    }
+
+    private static long decimal(JsonNode value, String field) throws IOException {
+        if (!value.isTextual() || !value.asText().matches("0|[1-9][0-9]*"))
+            throw new IOException("Invalid economy response field: " + field);
+        try { return Long.parseLong(value.asText()); }
+        catch (NumberFormatException ex) { throw new IOException("Economy value is out of range: " + field, ex); }
+    }
+
+    private static int integer(JsonNode value, String field) throws IOException {
+        if (!value.isIntegralNumber() || !value.canConvertToInt())
+            throw new IOException("Invalid economy response field: " + field);
+        return value.intValue();
+    }
+
+    private static boolean bool(JsonNode object, String field) throws IOException {
+        JsonNode value = object.path(field);
+        if (!value.isBoolean()) throw new IOException("Invalid economy response field: " + field);
+        return value.booleanValue();
+    }
+
+    private static long signedDecimal(JsonNode value, String field) throws IOException {
+        if (!value.isTextual() || !value.asText().matches("-?(0|[1-9][0-9]*)"))
+            throw new IOException("Invalid economy response field: " + field);
+        try { return Long.parseLong(value.asText()); }
+        catch (NumberFormatException ex) { throw new IOException("Economy value is out of range: " + field, ex); }
     }
 }

@@ -96,6 +96,53 @@ class EconomyV2ClientTest {
     }
 
     @Test
+    void inventoryCatalogAndLeaderboardParseNeutralStructuredResponses() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/economy/v1/execute", exchange -> {
+            try (exchange) {
+                JsonNode request = JSON.readTree(exchange.getRequestBody());
+                String operation = request.path("operation").asText();
+                Map<String, Object> result = switch (operation) {
+                    case "inventory.list" -> Map.of("type", "inventory", "user_id", "456789012345678901",
+                        "items", java.util.List.of(Map.of("item_id", "fish", "quantity", "3")));
+                    case "shop.catalog" -> Map.of("type", "shop_catalog",
+                        "products", java.util.List.of(Map.of("product_id", "rod", "name", "Fishing Rod",
+                            "description", "Basic tool", "category", "tools", "current_price", "65",
+                            "effective_price", "52", "stock", "-1", "available", true, "rarity", "common")),
+                        "sales", java.util.List.of(Map.of("product_id", "rod", "category", "",
+                            "discount_percent", 20, "ends_at_epoch", "2000000000")));
+                    case "wallet.leaderboard" -> Map.of("type", "leaderboard", "entries",
+                        java.util.List.of(Map.of("user_id", "456789012345678901", "balance", "4821")));
+                    default -> throw new AssertionError("Unexpected operation " + operation);
+                };
+                byte[] response = JSON.writeValueAsBytes(Map.of("request_id", request.path("request_id").asText(),
+                    "status", "ok", "result", result));
+                exchange.sendResponseHeaders(200, response.length);
+                exchange.getResponseBody().write(response);
+            }
+        });
+        server.start();
+        try {
+            var client = new EconomyV2Client(HttpClient.newHttpClient(),
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort()), SECRET);
+            var inventory = client.inventory("123456789012345678", "234567890123456789",
+                "345678901234567890", "456789012345678901");
+            assertEquals(new EconomyV2Client.InventoryItem("fish", 3), inventory.items().getFirst());
+            var catalog = client.shopCatalog("123456789012345678", "234567890123456789",
+                "345678901234567890", "tools");
+            assertEquals(52, catalog.products().getFirst().effectivePrice());
+            assertEquals(-1, catalog.products().getFirst().stock());
+            assertEquals(20, catalog.sales().getFirst().discountPercent());
+            assertEquals(2_000_000_000L, catalog.sales().getFirst().endsAtEpoch());
+            var leaderboard = client.leaderboard("123456789012345678", "234567890123456789",
+                "345678901234567890", 10);
+            assertEquals(new EconomyV2Client.LeaderboardEntry("456789012345678901", 4821), leaderboard.getFirst());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void unavailableServiceAndMalformedResponseFailClosed() throws Exception {
         int unusedPort;
         try (var socket = new ServerSocket(0)) { unusedPort = socket.getLocalPort(); }

@@ -78,11 +78,10 @@ public final class BotConfig {
     }
     public String get(String name, String fallback) { return values.get(name, fallback); }
 
-    EconomyV2Client economyV2BalanceClient() {
-        String source = get("TORI_ECONOMY_BALANCE_SOURCE", "LEGACY");
-        if ("LEGACY".equals(source)) return null;
-        if (!"ELIXIR".equals(source))
-            throw new ConfigurationException("TORI_ECONOMY_BALANCE_SOURCE must be LEGACY or ELIXIR.");
+    EconomyRouting economyRouting() { return EconomyRouting.from(this); }
+
+    EconomyV2Client economyV2Client(EconomyRouting routing) {
+        if (!routing.usesElixir()) return null;
         URI url;
         try { url = URI.create(get("TORI_ECONOMY_URL", "http://127.0.0.1:4001")); }
         catch (IllegalArgumentException ex) { throw new ConfigurationException("TORI_ECONOMY_URL is invalid."); }
@@ -96,6 +95,8 @@ public final class BotConfig {
         return new EconomyV2Client(java.net.http.HttpClient.newBuilder()
             .connectTimeout(java.time.Duration.ofSeconds(2)).build(), url, secret);
     }
+
+    EconomyV2Client economyV2BalanceClient() { return economyV2Client(economyRouting()); }
 
     String redactSensitive(String text) {
         String safe = text;

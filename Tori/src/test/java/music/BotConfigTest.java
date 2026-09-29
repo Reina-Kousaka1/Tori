@@ -90,6 +90,32 @@ class BotConfigTest {
             () -> BotConfig.load(directory).economyV2BalanceClient());
     }
 
+    @Test void economyRoutingDefaultsToLegacyAndSupportsPerReadAreaOptIn() throws Exception {
+        Files.writeString(directory.resolve(".env"), "");
+        var legacy = BotConfig.load(directory).economyRouting();
+        assertEquals(EconomyRouting.Source.LEGACY, legacy.source("balance"));
+        assertEquals(EconomyRouting.Source.LEGACY, legacy.source("inventory"));
+
+        Files.writeString(directory.resolve(".env"), "TORI_ECONOMY_ROUTING=balance=ELIXIR,inventory=ELIXIR,leaderboard=ELIXIR\n");
+        var routed = BotConfig.load(directory).economyRouting();
+        assertEquals(EconomyRouting.Source.ELIXIR, routed.source("balance"));
+        assertEquals(EconomyRouting.Source.ELIXIR, routed.source("inventory"));
+        assertEquals(EconomyRouting.Source.LEGACY, routed.source("shop"));
+        assertEquals(EconomyRouting.Source.ELIXIR, routed.source("leaderboard"));
+        assertTrue(routed.usesElixir());
+    }
+
+    @Test void economyRoutingKeepsBalanceFlagCompatibilityAndRejectsAmbiguousRoutes() throws Exception {
+        Files.writeString(directory.resolve(".env"), "TORI_ECONOMY_BALANCE_SOURCE=ELIXIR\n");
+        assertEquals(EconomyRouting.Source.ELIXIR, BotConfig.load(directory).economyRouting().source("balance"));
+
+        Files.writeString(directory.resolve(".env"), "TORI_ECONOMY_ROUTING=balance=LEGACY,balance=ELIXIR\n");
+        assertThrows(BotConfig.ConfigurationException.class, () -> BotConfig.load(directory).economyRouting());
+
+        Files.writeString(directory.resolve(".env"), "TORI_ECONOMY_ROUTING=market=ELIXIR\n");
+        assertThrows(BotConfig.ConfigurationException.class, () -> BotConfig.load(directory).economyRouting());
+    }
+
     @Test void blankRequiredValuesAreRejected() throws Exception {
         Files.writeString(directory.resolve(".env"), "BOT_CONFIG_TEST_EMPTY=\nBOT_CONFIG_TEST_BLANK=\"   \"\n");
         var config = BotConfig.load(directory);
