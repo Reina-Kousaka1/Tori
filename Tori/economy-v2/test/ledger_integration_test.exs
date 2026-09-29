@@ -21,6 +21,12 @@ defmodule ToriEconomy.LedgerIntegrationTest do
       end
     end)
 
+    expected_database = uri.path |> String.trim_leading("/") |> URI.decode()
+
+    unless Sql.query!("SELECT current_database()", []).rows == [[expected_database]] do
+      raise "The application Repo is not connected to TORI_ECONOMY_TEST_DATABASE_URL"
+    end
+
     %{repo_pid: repo_pid}
   end
 
@@ -123,6 +129,13 @@ defmodule ToriEconomy.LedgerIntegrationTest do
       "context" => request.context,
       "args" => request.args
     }
+  end
+
+  test "the application Repo uses the configured isolated test database" do
+    assert same_test_database?(Repo.config(), @url)
+
+    expected_database = @url |> URI.parse() |> Map.fetch!(:path) |> String.trim_leading("/") |> URI.decode()
+    assert [[^expected_database]] = Sql.query!("SELECT current_database()", []).rows
   end
 
   test "daily commits once, replays after a lost response, and writes one ledger leg" do
