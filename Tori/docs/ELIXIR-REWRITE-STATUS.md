@@ -33,6 +33,9 @@ Elixir domain increment. It is not a production cutover approval.
   equipment from V2 tables. It omits XP, careers, fashion loadout and
   achievements because those states do not exist yet. It is an internal API
   read, not a migrated `/profile` Discord command.
+- `ToriEconomy.Progression.Policy` can derive a level from an explicitly
+  supplied, validated threshold curve. The numeric values in its tests are
+  fixtures only. No XP source, runtime curve, level reward or writer is active.
 
 ## Ownership and cutover boundaries
 
