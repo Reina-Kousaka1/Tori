@@ -1,0 +1,152 @@
+defmodule ToriEconomy.RewriteDomainTest do
+  use ExUnit.Case, async: false
+  alias ToriEconomy.{Api, Contract, Equipment, Marketplace, Progression, Shop, Sql, TestSchema, WriteGate}
+  alias ToriEconomy.Shop.Rotation
+
+  @url System.get_env("TORI_ECONOMY_TEST_DATABASE_URL")
+  @moduletag skip: if(is_nil(@url), do: "requires explicit isolated *_test database", else: false)
+
+  setup_all do
+    TestSchema.ensure_target!(@url)
+    :ok
+  end
+
+  setup do
+    names = ~w(TORI_ECONOMY_WRITE_ENABLED TORI_ECONOMY_WRITE_MODE TORI_ECONOMY_DATABASE_URL)
+    saved = Map.new(names, fn name -> {name, System.get_env(name)} end)
+    on_exit(fn -> Enum.each(saved, fn {name, value} -> restore(name, value) end) end)
+    :ok
+  end
+
+  defp snowflake, do: Integer.to_string(8_000_000_000_000_000_000 + :rand.uniform(999_999_999_999_999_999))
+  defp request(operation, actor, args \\ %{}, interaction \\ nil) do
+    context = %{"actor_user_id" => actor, "guild_id" => "234567890123456789",
+                "channel_id" => "345678901234567890"}
+    %{"request_id" => Ecto.UUID.generate(), "operation" => operation, "context" => context,
+      "args" => args, "idempotency_key" => "discord-interaction:" <> (interaction || snowflake())}
+    |> then(fn raw ->
+      {:ok, validated} = Contract.validate(raw)
+      validated
+    end)
+  end
+
+  test "weighted rotation is stable for a seed and excludes out-of-season items" do
+    items = [
+      %{id: "a", weight: 100, season: nil, tags: []},
+      %{id: "b", weight: 5, season: "winter", tags: []},
+      %{id: "c", weight: 20, season: "summer", tags: ["summer"]}
+    ]
+    assert Rotation.choose(items, 42, :summer, 3) == Rotation.choose(items, 42, :summer, 3)
+    {_theme, selected} = Rotation.choose(items, 42, :summer, 3)
+    refute Enum.any?(selected, &(&1.id == "b"))
+  end
+
+  test "new mutations are test-only and disabled mode is read-only" do
+    System.put_env("TORI_ECONOMY_WRITE_ENABLED", "true")
+    System.put_env("TORI_ECONOMY_WRITE_MODE", "disabled")
+    assert :ok == WriteGate.validate_startup!()
+    assert {:error, "READ_ONLY"} == WriteGate.authorize("shop.purchase")
+    assert {:error, "READ_ONLY"} == WriteGate.authorize("progression.grant")
+    secret_before = System.get_env("TORI_ECONOMY_API_SECRET")
+    on_exit(fn -> restore("TORI_ECONOMY_API_SECRET", secret_before) end)
+    System.put_env("TORI_ECONOMY_API_SECRET", String.duplicate("t", 32))
+    req = request("progression.grant", snowflake(), %{"source_code" => "activity_test"})
+    response = Plug.Test.conn(:post, "/internal/economy/v1/execute", Jason.encode!(%{
+      "request_id" => req.request_id, "idempotency_key" => req.idempotency_key,
+      "operation" => req.operation, "context" => req.context, "args" => req.args
+    }))
+    |> Plug.Conn.put_req_header("authorization", "Bearer " <> String.duplicate("t", 32))
+    |> Plug.Conn.put_req_header("content-type", "application/json")
+    |> Api.call([])
+    assert response.status == 403
+    assert Jason.decode!(response.resp_body)["error"]["code"] == "READ_ONLY"
+    System.put_env("TORI_ECONOMY_WRITE_MODE", "test")
+    System.put_env("TORI_ECONOMY_DATABASE_URL", @url)
+    assert :ok == WriteGate.authorize("shop.purchase")
+  end
+
+  test "shop purchase is atomic and interaction replay cannot double charge" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,10000)", [user])
+    # Rotation creation is an explicit test write, persisted once for this period.
+    System.put_env("TORI_ECONOMY_WRITE_ENABLED", "true")
+    System.put_env("TORI_ECONOMY_WRITE_MODE", "test")
+    System.put_env("TORI_ECONOMY_DATABASE_URL", @url)
+    {:ok, rotation} = Rotation.current()
+    item = Enum.find(rotation["items"], &(&1["remaining"] == nil)) || hd(rotation["items"])
+    args = %{"item_id" => item["item_id"], "quantity" => 1,
+             "period_key" => rotation["period_key"]}
+    first_request = request("shop.purchase", user, args)
+    assert {:ok, first} = Shop.execute(first_request)
+    assert first["status"] == "ok"
+    assert {:ok, replay} = Shop.execute(%{first_request | request_id: Ecto.UUID.generate()})
+    assert replay["result"] == first["result"]
+    assert [[1]] = Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1",
+      [first_request.idempotency_key]).rows
+  end
+
+  test "configured career XP is idempotent and does not invent a threshold" do
+    user = snowflake()
+    source = "test_" <> snowflake()
+    Sql.query!("INSERT INTO economy_v2_xp_sources(source_code,reward_xp,cooldown_ms,career_code,active) VALUES ($1,7,60000,'ballet',true)", [source])
+    req = request("progression.grant", user, %{"source_code" => source})
+    assert {:ok, first} = Progression.execute(req)
+    assert first["result"]["xp"] == "7"
+    assert {:ok, replay} = Progression.execute(%{req | request_id: Ecto.UUID.generate()})
+    assert replay["result"] == first["result"]
+    assert {:ok, cooldown} = Progression.execute(request("progression.grant", user, %{"source_code" => source}))
+    assert cooldown["error"]["code"] == "COOLDOWN_ACTIVE"
+  end
+
+  test "marketplace listing escrows an owned item and replay preserves quantity" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'leopard_baby_tee',1)", [user])
+    req = request("marketplace.list", user, %{"item_id" => "leopard_baby_tee", "quantity" => 1,
+      "ask_price" => "90", "expires_hours" => 24})
+    assert {:ok, first} = Marketplace.execute(req)
+    assert first["status"] == "ok"
+    assert {:ok, replay} = Marketplace.execute(%{req | request_id: Ecto.UUID.generate()})
+    assert replay["result"] == first["result"]
+    assert [] == Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='leopard_baby_tee'", [user]).rows
+  end
+
+  test "marketplace purchase transfers item and credits exactly once" do
+    seller = snowflake()
+    buyer = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,0),($2,500)", [seller, buyer])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'pink_lace_cami',1)", [seller])
+    listing = request("marketplace.list", seller, %{"item_id" => "pink_lace_cami", "quantity" => 1,
+      "ask_price" => "90", "expires_hours" => 24})
+    assert {:ok, %{"result" => %{"listing_id" => id}}} = Marketplace.execute(listing)
+    purchase = request("marketplace.buy", buyer, %{"listing_id" => id})
+    assert {:ok, first} = Marketplace.execute(purchase)
+    assert first["status"] == "ok"
+    assert {:ok, replay} = Marketplace.execute(%{purchase | request_id: Ecto.UUID.generate()})
+    assert replay["result"] == first["result"]
+    assert [[90]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [seller]).rows
+    assert [[410]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [buyer]).rows
+    assert [[1]] = Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='pink_lace_cami'", [buyer]).rows
+    assert [[2]] = Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1",
+      [purchase.idempotency_key]).rows
+  end
+
+  test "seller can reclaim an expired escrow and loadout requires ownership" do
+    seller = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [seller])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'soft_pink_slip_dress',1)", [seller])
+    equip = request("inventory.equip", seller, %{"item_id" => "soft_pink_slip_dress", "slot" => "dress"})
+    assert {:ok, %{"status" => "ok"}} = Equipment.execute(equip)
+    listing = request("marketplace.list", seller, %{"item_id" => "soft_pink_slip_dress", "quantity" => 1,
+      "ask_price" => "100", "expires_hours" => 1})
+    assert {:ok, %{"result" => %{"listing_id" => id}}} = Marketplace.execute(listing)
+    assert [] = Sql.query!("SELECT slot FROM economy_v2_loadout WHERE user_id=$1", [seller]).rows
+    Sql.query!("UPDATE economy_v2_marketplace_listings SET expires_at=now()-interval '1 second' WHERE listing_id=$1", [id])
+    cancel = request("marketplace.cancel", seller, %{"listing_id" => id})
+    assert {:ok, %{"status" => "ok"}} = Marketplace.execute(cancel)
+    assert [[1]] = Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='soft_pink_slip_dress'", [seller]).rows
+  end
+
+  defp restore(name, nil), do: System.delete_env(name)
+  defp restore(name, value), do: System.put_env(name, value)
+end

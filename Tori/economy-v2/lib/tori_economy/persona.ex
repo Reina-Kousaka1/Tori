@@ -15,6 +15,14 @@ defmodule ToriEconomy.Persona do
       excited: "That %{item_name} is yours! %{amount} Credits spent ✨"
     },
     "shop.purchase.insufficient_funds" => %{neutral: "You need more Credits for %{item_name}."},
+    "marketplace.purchase.success" => %{
+      neutral: "Purchased %{item_name} from the marketplace for %{amount} Credits.",
+      happy: "%{item_name} found a new home! %{amount} Credits spent ✨"
+    },
+    "progression.grant.success" => %{
+      neutral: "You gained %{amount} XP.",
+      excited: "A little progress! You gained %{amount} XP ✨"
+    },
     "inventory.empty" => %{neutral: "Your inventory is empty."},
     "activity.success" => %{neutral: "You received %{item_name}."},
     "profile.header" => %{neutral: "%{username}'s profile"},

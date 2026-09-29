@@ -4,7 +4,10 @@ defmodule ToriEconomy.WriteGate do
   alias Ecto.Adapters.SQL
 
   @production_ack "I_VERIFIED_BACKUP_RESTORE_SCHEMA_AND_EXCLUSIVE_WRITER_OWNERSHIP"
-  @mutations ["daily.claim", "wallet.transfer"]
+  @production_mutations ["daily.claim", "wallet.transfer"]
+  @mutations @production_mutations ++ ["shop.rotate", "shop.purchase", "inventory.equip",
+                                     "inventory.unequip", "progression.grant", "marketplace.list",
+                                     "marketplace.buy", "marketplace.cancel"]
 
   def authorize(operation) when operation in @mutations do
     if System.get_env("TORI_ECONOMY_WRITE_ENABLED") == "true" and mode_allows?(operation) do
@@ -46,7 +49,8 @@ defmodule ToriEconomy.WriteGate do
       "test" -> test_database?()
       "" -> test_database?()
       "production" ->
-        production_cutover_valid?() and operation in production_operations()
+        production_cutover_valid?() and operation in @production_mutations and
+          operation in production_operations()
 
       _ -> false
     end
@@ -75,7 +79,7 @@ defmodule ToriEconomy.WriteGate do
     |> String.split(",", trim: true)
     |> Enum.map(&String.trim/1)
     |> Enum.uniq()
-    |> Enum.filter(&(&1 in @mutations))
+    |> Enum.filter(&(&1 in @production_mutations))
   end
 
   defp configured_postgres? do

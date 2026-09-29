@@ -24,12 +24,26 @@ defmodule ToriEconomy.Queries do
       Sql.query!("SELECT slot, item_id FROM economy_equipment WHERE user_id=$1 ORDER BY slot", [user_id]).rows
       |> Enum.map(fn [slot, item_id] -> %{"slot" => slot, "item_id" => item_id} end)
 
+    loadout =
+      Sql.query!("SELECT slot,item_id FROM economy_v2_loadout WHERE user_id=$1 ORDER BY slot", [user_id]).rows
+      |> Enum.map(fn [slot, item_id] -> %{"slot" => slot, "item_id" => item_id} end)
+
+    activities =
+      Sql.query!("""
+      SELECT 'fish',last_fish_at FROM economy_accounts WHERE user_id=$1
+      UNION ALL SELECT 'mine',last_mine_at FROM economy_accounts WHERE user_id=$1
+      UNION ALL SELECT 'chop',last_chop_at FROM economy_accounts WHERE user_id=$1
+      """, [user_id]).rows
+      |> Enum.map(fn [activity, last_at] -> %{"activity" => activity, "last_at_ms" => Integer.to_string(last_at)} end)
+
     ok(request, %{
       "type" => "profile_snapshot",
       "user_id" => user_id,
       "balance" => Integer.to_string(balance),
       "items" => items,
-      "equipment" => equipment
+      "equipment" => equipment,
+      "loadout" => loadout,
+      "activities" => activities
     })
   end
 
