@@ -8,6 +8,7 @@ defmodule ToriEconomy.Application do
 
     children =
       if enabled? do
+        :ok = ToriEconomy.WriteGate.validate_startup!()
         secret = System.fetch_env!("TORI_ECONOMY_API_SECRET")
         url = System.fetch_env!("TORI_ECONOMY_DATABASE_URL")
 

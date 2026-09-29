@@ -3,7 +3,7 @@ defmodule ToriEconomy.Api do
   import Plug.Conn
   require Logger
 
-  alias ToriEconomy.{Accounts, Contract, Queries, Sql}
+  alias ToriEconomy.{Accounts, Contract, Queries, Sql, WriteGate}
 
   def init(opts), do: opts
 
@@ -14,7 +14,7 @@ defmodule ToriEconomy.Api do
           Sql.query!("SELECT 1")
           reply(conn, 200, %{"status" => "ok"})
         rescue
-          _ -> reply(conn, 503, error(nil, "TEMPORARILY_UNAVAILABLE", true))
+          _ -> reply(conn, 503, error(nil, "SERVICE_UNAVAILABLE", true))
         end
 
       {"POST", "/internal/economy/v1/execute"} ->
@@ -45,8 +45,11 @@ defmodule ToriEconomy.Api do
       {:more, _body, conn} ->
         reply(conn, 413, error(nil, "INVALID_INPUT", false))
 
-      {:error, "TEMPORARILY_UNAVAILABLE"} ->
-        reply(conn, 503, error(nil, "TEMPORARILY_UNAVAILABLE", true))
+      {:error, "SERVICE_UNAVAILABLE"} ->
+        reply(conn, 503, error(nil, "SERVICE_UNAVAILABLE", true))
+
+      {:error, code} when code in ["INVALID_AMOUNT", "INVALID_TARGET"] ->
+        reply(conn, 400, error(nil, code, false))
 
       _ ->
         reply(conn, 400, error(nil, "INVALID_INPUT", false))
@@ -55,7 +58,7 @@ defmodule ToriEconomy.Api do
     failure ->
       # No exception message, SQL text, request body or credential in logs.
       Logger.error("Economy request failed (#{inspect(failure.__struct__)})")
-      reply(conn, 503, error(nil, "TEMPORARILY_UNAVAILABLE", true))
+      reply(conn, 500, error(nil, "INTERNAL_ERROR", false))
   end
 
   # A running API is not permission to create a second wallet writer.
@@ -64,16 +67,36 @@ defmodule ToriEconomy.Api do
        do: :ok
 
   defp writes_allowed(_request) do
-    if System.get_env("TORI_ECONOMY_WRITE_ENABLED") == "true",
+    if WriteGate.writes_enabled?(),
       do: :ok,
       else: {:error, "READ_ONLY"}
   end
 
-  defp execute_request(%{operation: operation} = request)
-       when operation in ["inventory.list", "shop.catalog", "wallet.leaderboard"],
-       do: Queries.execute(request)
+  defp execute_request(request) do
+    started = System.monotonic_time(:millisecond)
 
-  defp execute_request(request), do: Accounts.execute(request)
+    result =
+      if request.operation in ["inventory.list", "shop.catalog", "wallet.leaderboard"],
+        do: Queries.execute(request),
+        else: Accounts.execute(request)
+
+    status =
+      case result do
+        {:ok, %{"status" => "ok"}} -> "OK"
+        {:ok, %{"error" => %{"code" => code}}} -> code
+        {:error, code} -> code
+        _ -> "INTERNAL_ERROR"
+      end
+
+    interaction_id = request.idempotency_key || "none"
+
+    Logger.info(
+      "economy request_id=#{request.request_id} interaction_id=#{interaction_id} " <>
+        "operation=#{request.operation} status=#{status} duration_ms=#{System.monotonic_time(:millisecond) - started}"
+    )
+
+    result
+  end
 
   defp authorized(conn) do
     expected = System.fetch_env!("TORI_ECONOMY_API_SECRET")

@@ -32,6 +32,7 @@ defmodule ToriEconomy.Contract do
          fingerprint: fingerprint(operation, context, args)
        }}
     else
+      {:error, code} when code in ["INVALID_AMOUNT", "INVALID_TARGET"] -> {:error, code}
       _ -> {:error, "INVALID_INPUT"}
     end
   end
@@ -63,16 +64,33 @@ defmodule ToriEconomy.Contract do
 
   defp validate_args("wallet.transfer", args) do
     with :ok <- keys(args, ["recipient_user_id", "amount"]),
-         :ok <- snowflake(args["recipient_user_id"]),
-         amount when is_binary(amount) <- args["amount"],
-         true <- Regex.match?(~r/^[1-9][0-9]*$/, amount),
+         :ok <- transfer_target(args["recipient_user_id"]),
+         :ok <- transfer_amount(args["amount"]) do
+      :ok
+    else
+      {:error, code} when code in ["INVALID_AMOUNT", "INVALID_TARGET"] -> {:error, code}
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
+
+  defp transfer_target(value) do
+    case snowflake(value) do
+      :ok -> :ok
+      _ -> {:error, "INVALID_TARGET"}
+    end
+  end
+
+  defp transfer_amount(amount) when is_binary(amount) do
+    with true <- Regex.match?(~r/^[1-9][0-9]*$/, amount),
          {parsed, ""} <- Integer.parse(amount),
          true <- parsed <= @max_amount do
       :ok
     else
-      _ -> {:error, "INVALID_INPUT"}
+      _ -> {:error, "INVALID_AMOUNT"}
     end
   end
+
+  defp transfer_amount(_), do: {:error, "INVALID_AMOUNT"}
 
   defp validate_key(operation, nil) when operation in @reads, do: :ok
 

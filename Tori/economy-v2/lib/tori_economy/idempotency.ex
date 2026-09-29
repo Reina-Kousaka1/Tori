@@ -3,9 +3,15 @@ defmodule ToriEconomy.Idempotency do
   alias ToriEconomy.{Repo, Sql}
 
   def run(request, fun) when is_function(fun, 0) do
-    case Repo.transaction(fn -> run_in_transaction(request, fun) end) do
-      {:ok, result} -> {:ok, Map.put(result, "request_id", request.request_id)}
-      {:error, _} -> {:error, "TEMPORARILY_UNAVAILABLE"}
+    try do
+      case Repo.transaction(fn -> run_in_transaction(request, fun) end) do
+        {:ok, result} -> {:ok, Map.put(result, "request_id", request.request_id)}
+        {:error, _} -> {:error, "SERVICE_UNAVAILABLE"}
+      end
+    rescue
+      _ -> {:error, "SERVICE_UNAVAILABLE"}
+    catch
+      :exit, _ -> {:error, "SERVICE_UNAVAILABLE"}
     end
   end
 

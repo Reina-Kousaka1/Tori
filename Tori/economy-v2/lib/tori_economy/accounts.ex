@@ -70,7 +70,7 @@ defmodule ToriEconomy.Accounts do
           [user_id, next, now]
         )
 
-        ledger(user_id, request, "daily", @daily_reward, next, "DAILY", nil)
+        ledger(user_id, request, "daily", @daily_reward, next, "DAILY_CLAIM", nil)
 
         success(%{
           "type" => "daily_claimed",
@@ -87,26 +87,33 @@ defmodule ToriEconomy.Accounts do
     amount = String.to_integer(request.args["amount"])
 
     if sender == recipient do
-      error("INVALID_INPUT")
+      error("INVALID_TARGET")
     else
       [first, second] = Enum.sort([sender, recipient])
-      ensure_account(first)
-      ensure_account(second)
+      created_accounts = Enum.filter([first, second], &ensure_account/1)
+      balances =
+        [first, second]
+        |> Enum.map(fn user_id ->
+          case Sql.query!("SELECT balance FROM economy_accounts WHERE user_id = $1 FOR UPDATE", [user_id]).rows do
+            [[balance]] -> {user_id, balance}
+            [] -> {user_id, 0}
+          end
+        end)
+        |> Map.new()
 
-      [[first_balance]] =
-        Sql.query!("SELECT balance FROM economy_accounts WHERE user_id = $1 FOR UPDATE", [first]).rows
-
-      [[second_balance]] =
-        Sql.query!("SELECT balance FROM economy_accounts WHERE user_id = $1 FOR UPDATE", [second]).rows
+      first_balance = balances[first]
+      second_balance = balances[second]
 
       from = if sender == first, do: first_balance, else: second_balance
       to = if recipient == first, do: first_balance, else: second_balance
 
       cond do
         from < amount ->
+          remove_created_accounts(created_accounts)
           error("INSUFFICIENT_FUNDS")
 
         to > @max_balance - amount ->
+          remove_created_accounts(created_accounts)
           error("INVALID_INPUT")
 
         true ->
@@ -134,10 +141,18 @@ defmodule ToriEconomy.Accounts do
   end
 
   defp ensure_account(user_id) do
-    Sql.query!(
-      "INSERT INTO economy_accounts(user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING",
+    result = Sql.query!(
+      "INSERT INTO economy_accounts(user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING RETURNING user_id",
       [user_id]
     )
+
+    result.rows != []
+  end
+
+  defp remove_created_accounts(user_ids) do
+    Enum.each(user_ids, fn user_id ->
+      Sql.query!("DELETE FROM economy_accounts WHERE user_id=$1 AND balance=0", [user_id])
+    end)
   end
 
   defp ledger(user_id, request, leg, delta, balance, reason, counterparty) do

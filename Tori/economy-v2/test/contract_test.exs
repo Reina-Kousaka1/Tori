@@ -50,10 +50,12 @@ defmodule ToriEconomy.ContractTest do
     }
 
     assert {:ok, _} = Contract.validate(transfer)
-    assert {:error, "INVALID_INPUT"} = Contract.validate(put_in(transfer, ["args", "amount"], 50))
+    assert {:error, "INVALID_AMOUNT"} = Contract.validate(put_in(transfer, ["args", "amount"], 50))
 
-    assert {:error, "INVALID_INPUT"} =
+    assert {:error, "INVALID_AMOUNT"} =
              Contract.validate(put_in(transfer, ["args", "amount"], "9223372036854775808"))
+    assert {:error, "INVALID_TARGET"} =
+             Contract.validate(put_in(transfer, ["args", "recipient_user_id"], "not-a-snowflake"))
   end
 
   test "read-only balance does not require idempotency key" do
