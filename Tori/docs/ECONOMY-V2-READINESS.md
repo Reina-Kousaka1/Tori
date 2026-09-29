@@ -14,32 +14,37 @@ global wallet source, while `economy_v2_requests` stores interaction-keyed
 results and `economy_v2_ledger_entries` stores `DAILY_CLAIM`, `TRANSFER_OUT`,
 and `TRANSFER_IN`. Balance updates, ledger legs, and replay result commit in
 one transaction. Transfers lock both account rows in a stable sorted order.
-No schema was added to Flyway and no database was contacted during this work.
+No schema was added to Flyway. The reported verification used only the
+isolated test database; production PostgreSQL was not contacted.
 
-Current verification for this implementation:
+Current verification for this implementation (Elixir/PostgreSQL run reported
+from the Raspberry Pi on 2026-09-29):
 
 | Gate | Result | Evidence / limit |
 | --- | --- | --- |
 | Java clean test/build | PASS | `gradlew clean test build --no-daemon`: 250 tests, 0 failures, 0 errors, 6 optional live tests skipped. |
-| Elixir format/compile/test | BLOCKED / NOT RUN | `mix test` could not start because `mix` is not installed in this environment. |
-| Java → Elixir → PostgreSQL mutation integration | NOT RUN | Opt-in live test added; no Elixir runtime or isolated PostgreSQL endpoint available. |
-| Daily/transfer restart replay | NOT RUN | Test added; requires the isolated PostgreSQL integration environment. |
-| Parallel/race tests | NOT RUN | Tests added for identical requests, concurrent transfers, and opposing lock order; not executed. |
-| Mid-transaction rollback | NOT RUN | Trigger-based isolated PostgreSQL test added; not executed. |
-| Production database contacted | NO | No production URL was used. |
-| Production Elixir writes enabled | NO | Default remains `READ_ONLY`; no production cutover. |
+| Elixir build and suite | PASS | Raspberry Pi report: `mix test`, 21 tests, 0 failures, and no DB-related skips. |
+| Elixir/PostgreSQL integration | PASS | Used only isolated `tori_economy_test` on port 5433 with existing V1–V4 and draft V5 applied. |
+| Daily replay after Repo restart | PASS | Included in the reported non-skipped PostgreSQL integration suite. |
+| Full Elixir/BEAM service restart replay | NOT RUN | The checked-in test restarts the Repo process; it does not restart the full service runtime. |
+| Parallel/race tests | PASS | Included in the reported non-skipped PostgreSQL integration suite. |
+| Mid-transaction rollback | PASS | Included in the reported non-skipped PostgreSQL integration suite. |
+| Java → Elixir → PostgreSQL live mutation test | NOT RUN | Separate opt-in Gradle live test; it was among the six skipped in the local Java run and was not included in the Pi `mix test` report. |
+| Production database contacted | NO | The Pi report confirms the isolated test database was used exclusively. |
+| Production Elixir writes enabled | NO | Java production routes remain `LEGACY`; Elixir writes remain gated to an explicitly enabled `*_test` DB. |
 
-The Phase 1 verification table below is historical evidence from its earlier
-run and does not imply that the new Phase 2/3 Elixir tests passed. Do not push
-or enable Elixir writes until the blocked Elixir and isolated database tests
-have been run successfully.
+The Pi test results above were reported by the user; they were not rerun from
+this workstation. They clear the previously blocked Elixir/PostgreSQL suite.
+The distinct Java live mutation test remains unverified, and production writer
+cutover remains blocked by shared-database backup/restore and single-writer
+gates.
 
-This is a code and schema audit, not a production-data count. The Java bot still
-routes all economy commands to `PostgresCurrencyStore` and `PostgresMarketStore`.
-`/balance` can be routed through the Java `EconomyV2Client` to Elixir by an
-explicit setting; the default remains the legacy Java read. Elixir is disabled
-by default and its mutation API is read-only unless an explicit write gate is
-enabled. Runtime must use the same Tori PostgreSQL database and existing
+This is a code and schema audit, not a production-data count. Java retains
+`PostgresCurrencyStore` and `PostgresMarketStore` for legacy-owned areas;
+balance, inventory, shop, leaderboard, daily, and transfer can each be routed
+through `EconomyV2Client`. Every area defaults to LEGACY. Elixir's mutation API
+is read-only unless the explicit test-only write gate is enabled. Runtime must
+use the same Tori PostgreSQL database and existing
 `economy_accounts` tables; disposable databases in this document are test-only.
 The wallet key is **Discord user ID only**, never guild ID. IDs are PostgreSQL
 `TEXT` and are carried through the draft V2 schema without numeric conversion.
@@ -54,8 +59,8 @@ The current V2 implementation only supports balance, daily, and transfer.
 | Legacy path / indirect writer | Current state | Intended target | V2 support | Backfill | Parallel writer risk |
 | --- | --- | --- | --- | --- | --- |
 | `/balance`, `/leaderboard` | A reads; `balance()` creates a missing zero account | Global V2 wallet | Balance read only | A opening ledger | Yes if V2 daily/transfer active |
-| `/daily` | A.balance + A.last_daily_at | V2 daily + cooldown | Implemented, Java not routed | Balance + daily timestamp | Yes |
-| `/transfer` | Both A balances in one transaction | V2 transfer + two ledger legs | Implemented, Java not routed | Balances | Yes |
+| `/daily` | A.balance + A.last_daily_at | V2 daily + cooldown | Implemented, opt-in Java route; default LEGACY | Balance + daily timestamp | Yes |
+| `/transfer` | Both A balances in one transaction | V2 transfer + two ledger legs | Implemented, opt-in Java route; default LEGACY | Balances | Yes |
 | `/beg`, `/work` | A.balance + A.last_beg_at/last_work_at | V2 activities | No | Balances + timestamps | Yes |
 | `/loot`, `/grantcredits` | `changeBalance` → A.balance | V2 awards/admin grants | No | Balances | Yes |
 | `/gamble`, `/slots` | `settleWager` → A.balance | V2 wagers | No | Balances | Yes |
@@ -135,16 +140,18 @@ The API remains disabled by default and locally bound.
 Sources: https://hex.pm/packages/bandit/advisories ,
 https://bandit.hexdocs.pm/Bandit.html .
 
-## Verification record
+## Previous phase verification record
 
-These results use disposable local PostgreSQL 17 containers, not production.
+The following results are from the earlier Phase 1/backfill audit. They are
+historical and do not replace the Phase 2/3 results at the top of this file.
+Those fixture runs used disposable local PostgreSQL 17 containers, not production.
 The Java live suite ran against a fresh `tori_test` database with Flyway V1–V4.
 The backfill fixture used a separate `tori_test` database with draft V5 applied
 manually. The restore target was a third, empty `tori_restore_test` database.
 
 | Gate | Result | Evidence / limit |
 | --- | --- | --- |
-| Java build | PASS | `gradlew clean test build`; 246 tests, 0 failures, 0 errors, 6 optional live tests skipped. |
+| Java build | PASS | Earlier run: `gradlew clean test build`; 246 tests, 0 failures, 0 errors, 6 optional live tests skipped. Current Phase 2/3 run: 250 tests, 0 failures/errors, 6 optional live tests skipped. |
 | Elixir build | PASS | `mix compile` in Elixir 1.18 container using Bandit 1.12.5. |
 | API validation | PASS | 13 ExUnit tests, 0 failures; includes malformed input, auth and read-only gate. |
 | Idempotency | PASS | Replayed daily request and eight parallel identical requests produced one ledger leg. |
@@ -165,5 +172,6 @@ manually. The restore target was a third, empty `tori_restore_test` database.
 | Backup script end-to-end | NOT RUN | Script parsed successfully; host `psql`/`pg_dump`/`pg_restore` were unavailable. Equivalent commands ran inside PostgreSQL container. |
 
 No production write cutover is authorized. `TORI_ECONOMY_WRITE_ENABLED` must
-remain false until complete parity and writer ownership are demonstrated.
-Actual Tori database backup/restore and runtime connection remain blockers.
+remain false for production until complete parity, backup/restore and writer
+ownership are demonstrated. The Pi test database result does not verify the
+production database backup/restore or production runtime connection.
