@@ -25,10 +25,16 @@ defmodule ToriEconomy.Persona do
     context = Keyword.get(opts, :context, :general)
     context = if context in @contexts, do: context, else: :general
     date = Keyword.get(opts, :date, Date.utc_today())
-    mood = Keyword.get_lazy(opts, :mood, fn -> Mood.snapshot() end)
+    mood = Keyword.get_lazy(opts, :mood, &current_mood/0)
 
     %{identity: :tori, context: context, mood: mood.mood,
       intensity: mood.intensity, season: Season.current(date, Keyword.get(opts, :event))}
+  end
+
+  defp current_mood do
+    Mood.snapshot()
+  catch
+    :exit, _ -> Mood.new(System.system_time(:millisecond))
   end
 
   def render(key, variables, %{context: context, mood: mood, intensity: intensity, season: season})
