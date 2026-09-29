@@ -5,8 +5,10 @@ import dev.arbjerg.lavalink.libraries.jda.JDAVoiceUpdateListener;
 import net.dv8tion.jda.api.*;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.cache.CacheFlag;
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.nio.charset.StandardCharsets;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
@@ -14,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class Main implements AutoCloseable {
+    private static final Logger LOG = LoggerFactory.getLogger(Main.class);
     private final Instant startedAt;
     private final String sessionId = UUID.randomUUID().toString();
     private final BotStore store;
@@ -42,14 +45,16 @@ public final class Main implements AutoCloseable {
         boolean again;
         do {
             Main bot = null;
+            BotConfig config = null;
             Thread shutdownHook = null;
             again = false;
             try {
-                BotConfig config = BotConfig.load();
+                config = BotConfig.load();
                 if (args.length == 1 && args[0].equals("--register-commands")) {
-                    CommandRegistration.register(config.required("DISCORD_TOKEN"), config.get("DISCORD_GUILD_ID"));
+                    CommandRegistration.register(config.discordToken(), config.get("DISCORD_GUILD_ID"));
                     return;
                 }
+                config.validateForStartup();
                 bot = new Main(Instant.now(), PostgresBotStore.fromConfig(config));
                 Main running = bot;
                 shutdownHook = new Thread(running::close, "bot-shutdown");
@@ -58,9 +63,7 @@ public final class Main implements AutoCloseable {
                 again = "RESTART".equals(bot.stopReason)
                     && !Boolean.parseBoolean(config.get("BOT_RESTART_EXTERNAL", "false"));
             } catch (Exception ex) {
-                LoggerFactory.getLogger(Main.class).error("Bot startup or execution failed ({})", ex.getClass().getSimpleName());
-                if (ex instanceof CommandRegistration.RegistrationException)
-                    LoggerFactory.getLogger(Main.class).error("{}", ex.getMessage());
+                logStartupFailure(ex, config);
                 result = 1;
             } finally {
                 if (bot != null) {
@@ -77,6 +80,29 @@ public final class Main implements AutoCloseable {
         } while (again);
         System.exit(result);
     }
+
+    private static void logStartupFailure(Exception ex, BotConfig config) {
+        if (ex instanceof BotConfig.ConfigurationException configurationError) {
+            LOG.error("Bot startup configuration failed: {}", configurationError.getMessage());
+        } else if (ex instanceof CommandRegistration.RegistrationException) {
+            LOG.error("{}", ex.getMessage());
+        } else {
+            LOG.error("{}", unexpectedStartupDiagnostic(ex, config));
+        }
+    }
+
+    static String unexpectedStartupDiagnostic(Exception failure, BotConfig config) {
+        return "Bot startup or execution failed (" + failure.getClass().getSimpleName()
+            + "); full sanitized stacktrace follows:\n" + diagnosticStackTrace(failure, config);
+    }
+
+    static String diagnosticStackTrace(Throwable failure, BotConfig config) {
+        var trace = new StringWriter();
+        failure.printStackTrace(new PrintWriter(trace));
+        String rendered = trace.toString();
+        return config == null ? rendered : config.redactSensitive(rendered);
+    }
+
     private void run(BotConfig config) throws Exception {
         initialize(config);
         jda.awaitReady();
@@ -91,12 +117,10 @@ public final class Main implements AutoCloseable {
 
     private synchronized void initialize(BotConfig config) throws Exception {
         if (closing.get()) throw new IllegalStateException("Startup interrupted by shutdown");
-        String token = config.required("DISCORD_TOKEN");
+        String token = config.discordToken();
         long ownerId = config.ownerId();
         config.required("LAVALINK_PASSWORD");
-        long botId;
-        try { botId = Long.parseLong(new String(Base64.getUrlDecoder().decode(token.split("\\.")[0]), StandardCharsets.UTF_8)); }
-        catch (Exception ex) { throw new IllegalArgumentException("DISCORD_TOKEN has an invalid format."); }
+        long botId = config.discordBotId();
         LanguageStore languages = store instanceof PostgresBotStore
             ? LanguageStore.fromStore(config, store) : LanguageStore.fromConfig(config);
         client = new LavalinkClient(botId);
@@ -109,8 +133,15 @@ public final class Main implements AutoCloseable {
             .withPersona(new ToriPersona(ToriPersonaConfig.load(config))).withShutdown(this::requestShutdown);
         if (store instanceof PostgresBotStore postgres) {
             general.withCurrency(new PostgresCurrencyStore(postgres.database()));
-            var market = new PostgresMarketStore(postgres.database());
-            marketScheduler = new PostgresMarketScheduler(market, Clock.systemUTC());
+            EconomyRouting economyRouting = config.economyRouting();
+            general.withEconomyRouting(economyRouting);
+            EconomyV2Client economyClient = config.economyV2Client(economyRouting);
+            if (economyClient != null) general.withEconomyV2Balance(economyClient);
+            MarketMode marketMode = MarketMode.parse(config.get("TORI_MARKET_MODE", "LEGACY"));
+            var market = new PostgresMarketStore(postgres.database(),
+                () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble(), marketMode);
+            if (marketMode == MarketMode.LEGACY)
+                marketScheduler = new PostgresMarketScheduler(market, Clock.systemUTC());
             general.withMarket(market);
             ticketOrders = new TicketOrderBot(languages, new TicketOrderStore(postgres.database()));
         }

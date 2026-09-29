@@ -45,6 +45,21 @@ class PostgresMarketStoreLiveTest {
                 assertTrue(market.createProduct(product));
                 ownsProduct = true;
                 assertEquals(20, market.quote(guildId, userId, productId, now));
+                var readOnly = new PostgresMarketStore(database, () -> 0.9, MarketMode.READ_ONLY);
+                assertEquals(20, readOnly.product(productId, now.plus(Duration.ofHours(2))).currentPrice(),
+                    "browsing must not evolve prices in read-only mode");
+                assertEquals(20, readOnly.quote(guildId, userId, productId, now.plusSeconds(1)));
+                assertTrue(readOnly.activeSales(now).isEmpty());
+                assertThrows(IllegalStateException.class,
+                    () -> readOnly.buy(guildId, userId, firstInteraction, productId, 1, now));
+                assertThrows(IllegalStateException.class, () -> readOnly.setStock(productId, 0, now));
+                assertThrows(IllegalStateException.class, () -> readOnly.createProduct(product));
+                assertThrows(IllegalStateException.class, () -> readOnly.seedCatalog(now));
+                assertThrows(IllegalStateException.class, () -> readOnly.evolveDueProducts(now));
+                assertThrows(IllegalStateException.class,
+                    () -> readOnly.maybeCreateRandomSale(now, List.of(), List.of(productId)));
+                assertEquals(2, market.product(productId, now).stock());
+                assertEquals(150, currency.balance(userId));
             }
 
             try (var database = new PostgresDatabase(url, user, password)) {

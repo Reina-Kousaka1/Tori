@@ -1,14 +1,18 @@
 package music;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.Comparator;
 
-/** Pure guild queue rules shared by command handling and tests. */
+/** Pure guild queue and order-access rules shared by command handling and tests. */
 final class OrderPolicy {
     private static final Set<String> TERMINAL=Set.of("DONE","CANCELLED");
     private OrderPolicy() {}
     static boolean active(String status) { return !TERMINAL.contains(status); }
+    static boolean mayManageOrders(boolean manageServer,boolean administrator,String staffRoleId,Collection<String> memberRoleIds) {
+        return manageServer||administrator||(staffRoleId!=null&&memberRoleIds.contains(staffRoleId));
+    }
     static boolean validTransition(String from,String to) {
         return active(from)&&Set.of("NOTED","PROCESSING","DONE","CANCELLED").contains(to)&&!from.equals(to);
     }

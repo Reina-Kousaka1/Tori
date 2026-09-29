@@ -21,15 +21,23 @@ final class PostgresMarketStore {
 
     private final PostgresDatabase database;
     private final DoubleSupplier random;
+    private final MarketMode mode;
 
     PostgresMarketStore(PostgresDatabase database) { this(database, () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble()); }
     PostgresMarketStore(PostgresDatabase database, DoubleSupplier random) {
+        this(database, random, MarketMode.LEGACY);
+    }
+    PostgresMarketStore(PostgresDatabase database, DoubleSupplier random, MarketMode mode) {
         this.database = Objects.requireNonNull(database);
         this.random = Objects.requireNonNull(random);
+        this.mode = Objects.requireNonNull(mode);
     }
+
+    boolean readOnly() { return mode != MarketMode.LEGACY; }
 
     /** Seeds only missing static catalog rows; existing prices, stock and availability are not overwritten. */
     void seedCatalog(Instant now) throws CurrencyStoreException {
+        mode.requireWritable();
         transaction(connection -> {
             for (ShopCatalog.Item item : ShopCatalog.market()) {
                 long base = item.price();
@@ -44,7 +52,8 @@ final class PostgresMarketStore {
                     sql.setString(1, item.id()); sql.setString(2, item.name()); sql.setString(3, item.description());
                     sql.setString(4, item.category()); sql.setLong(5, base); sql.setLong(6, base);
                     sql.setLong(7, minimum); sql.setLong(8, maximum);
-                    sql.setObject(9, now); sql.setObject(10, now); sql.setObject(11, now.plus(PRICE_PERIOD));
+                    PostgresTimestamps.bind(sql, 9, now); PostgresTimestamps.bind(sql, 10, now);
+                    PostgresTimestamps.bind(sql, 11, now.plus(PRICE_PERIOD));
                     sql.executeUpdate();
                 }
             }
@@ -55,7 +64,7 @@ final class PostgresMarketStore {
     DeseModels.Product product(String id, Instant now) throws CurrencyStoreException {
         String productId = normalizeId(id);
         if (!validProductId(productId)) return null;
-        evolveProductIfDue(productId, now);
+        if (!readOnly()) evolveProductIfDue(productId, now);
         return transaction(connection -> {
             try (var sql = connection.prepareStatement("SELECT * FROM economy_market_products WHERE product_id=?")) {
                 sql.setString(1, productId);
@@ -95,8 +104,9 @@ final class PostgresMarketStore {
         if (!validSnowflake(guildId) || !validSnowflake(userId)) return -1;
         DeseModels.Product product = product(productId, now);
         if (product == null || !product.available() || !product.unlimitedStock() && product.stock() <= 0) return -1;
+        if (readOnly()) return transaction(connection -> effectivePrice(connection, product, now, false));
         return transaction(connection -> {
-            long quoted = effectivePrice(connection, product, now);
+            long quoted = effectivePrice(connection, product, now, true);
             try (var sql = connection.prepareStatement("""
                 INSERT INTO economy_market_quotes(guild_id,user_id,product_id,quoted_price,quoted_at,expires_at)
                 VALUES (?,?,?,?,?,?)
@@ -104,7 +114,8 @@ final class PostgresMarketStore {
                     quoted_price=EXCLUDED.quoted_price,quoted_at=EXCLUDED.quoted_at,expires_at=EXCLUDED.expires_at
                 """)) {
                 sql.setString(1, guildId); sql.setString(2, userId); sql.setString(3, product.id());
-                sql.setLong(4, quoted); sql.setObject(5, now); sql.setObject(6, now.plus(QUOTE_LIFETIME));
+                sql.setLong(4, quoted); PostgresTimestamps.bind(sql, 5, now);
+                PostgresTimestamps.bind(sql, 6, now.plus(QUOTE_LIFETIME));
                 sql.executeUpdate();
             }
             return quoted;
@@ -132,6 +143,7 @@ final class PostgresMarketStore {
 
     DeseModels.Purchase buy(String guildId, String userId, String interactionId, String itemId,
                            int quantity, Instant now) throws CurrencyStoreException {
+        mode.requireWritable();
         String productId = normalizeId(itemId);
         if (!validSnowflake(guildId) || !validSnowflake(userId) || !validInteractionId(interactionId)
             || !validProductId(productId) || quantity < 1 || quantity > 100)
@@ -173,7 +185,8 @@ final class PostgresMarketStore {
             WHERE guild_id=? AND user_id=? AND product_id=? AND expires_at>?
             FOR UPDATE
             """)) {
-            sql.setString(1, guildId); sql.setString(2, userId); sql.setString(3, productId); sql.setObject(4, now);
+            sql.setString(1, guildId); sql.setString(2, userId); sql.setString(3, productId);
+            PostgresTimestamps.bind(sql, 4, now);
             try (var rows = sql.executeQuery()) {
                 if (!rows.next()) return new DeseModels.Purchase(DeseModels.PurchaseState.QUOTE_REQUIRED,
                     product, quantity, unitPrice, 0, 0, 0, "");
@@ -205,7 +218,8 @@ final class PostgresMarketStore {
         }
         long balanceAfter = balanceBefore - total;
         try (var sql = connection.prepareStatement("UPDATE economy_accounts SET balance=?,updated_at=? WHERE user_id=? AND balance>=?")) {
-            sql.setLong(1, balanceAfter); sql.setObject(2, now); sql.setString(3, userId); sql.setLong(4, total);
+            sql.setLong(1, balanceAfter); PostgresTimestamps.bind(sql, 2, now);
+            sql.setString(3, userId); sql.setLong(4, total);
             if (sql.executeUpdate() != 1) throw new PurchaseAbort(new DeseModels.Purchase(
                 DeseModels.PurchaseState.INSUFFICIENT_FUNDS, product, quantity, unitPrice, total, balanceBefore, balanceBefore, ""));
         }
@@ -224,14 +238,15 @@ final class PostgresMarketStore {
             sql.setString(1, transactionId); sql.setString(2, interactionId); sql.setString(3, guildId);
             sql.setString(4, userId); sql.setString(5, productId); sql.setInt(6, quantity); sql.setLong(7, unitPrice);
             sql.setLong(8, -total); sql.setLong(9, balanceBefore); sql.setLong(10, balanceAfter);
-            sql.setObject(11, now); sql.setString(12, sale == null ? null : sale.id()); sql.executeUpdate();
+            PostgresTimestamps.bind(sql, 11, now); sql.setString(12, sale == null ? null : sale.id()); sql.executeUpdate();
         }
         try (var sql = connection.prepareStatement("""
             INSERT INTO economy_market_inventory(guild_id,user_id,product_id,quantity,acquired_at,transaction_id)
             VALUES (?,?,?,?,?,?)
             """)) {
             sql.setString(1, guildId); sql.setString(2, userId); sql.setString(3, productId);
-            sql.setInt(4, quantity); sql.setObject(5, now); sql.setString(6, transactionId); sql.executeUpdate();
+            sql.setInt(4, quantity); PostgresTimestamps.bind(sql, 5, now);
+            sql.setString(6, transactionId); sql.executeUpdate();
         }
         try (var sql = connection.prepareStatement("DELETE FROM economy_market_quotes WHERE guild_id=? AND user_id=? AND product_id=?")) {
             sql.setString(1, guildId); sql.setString(2, userId); sql.setString(3, productId); sql.executeUpdate();
@@ -241,6 +256,7 @@ final class PostgresMarketStore {
     }
 
     boolean createProduct(DeseModels.Product product) throws CurrencyStoreException {
+        mode.requireWritable();
         validateProduct(product);
         return transaction(connection -> {
             try (var sql = connection.prepareStatement("""
@@ -253,31 +269,36 @@ final class PostgresMarketStore {
                 sql.setLong(7, product.minimumPrice()); sql.setLong(8, product.maximumPrice());
                 sql.setDouble(9, product.volatility()); sql.setLong(10, product.stock()); sql.setBoolean(11, product.available());
                 sql.setString(12, product.rarity()); sql.setArray(13, connection.createArrayOf("text", product.tags().toArray(String[]::new)));
-                sql.setObject(14, product.createdAt()); sql.setObject(15, product.updatedAt());
-                sql.setObject(16, product.nextPriceAt());
+                PostgresTimestamps.bind(sql, 14, product.createdAt());
+                PostgresTimestamps.bind(sql, 15, product.updatedAt());
+                PostgresTimestamps.bind(sql, 16, product.nextPriceAt());
                 return sql.executeUpdate() == 1;
             }
         });
     }
 
     boolean setStock(String id, long stock, Instant now) throws CurrencyStoreException {
+        mode.requireWritable();
         if (stock < -1) throw new IllegalArgumentException("Stock must be -1 (unlimited) or non-negative");
         String productId = normalizeId(id);
         if (!validProductId(productId)) return false;
         return transaction(connection -> {
             try (var sql = connection.prepareStatement("UPDATE economy_market_products SET stock=?,updated_at=? WHERE product_id=?")) {
-                sql.setLong(1, stock); sql.setObject(2, now); sql.setString(3, productId); return sql.executeUpdate() == 1;
+                sql.setLong(1, stock); PostgresTimestamps.bind(sql, 2, now);
+                sql.setString(3, productId); return sql.executeUpdate() == 1;
             }
         });
     }
 
     boolean maybeCreateRandomSale(Instant now, List<String> categories, List<String> productIds) throws CurrencyStoreException {
+        mode.requireWritable();
         double chance = sample();
         if (chance >= 0.08 || categories.isEmpty() && productIds.isEmpty()) return false;
         return transaction(connection -> {
             expireSales(connection, now);
             try (var sql = connection.prepareStatement("SELECT 1 FROM economy_market_sales WHERE status='ACTIVE' AND ends_at>? LIMIT 1")) {
-                sql.setObject(1, now); try (var rows = sql.executeQuery()) { if (rows.next()) return false; }
+                PostgresTimestamps.bind(sql, 1, now);
+                try (var rows = sql.executeQuery()) { if (rows.next()) return false; }
             }
             boolean byProduct = !productIds.isEmpty() && (categories.isEmpty() || sample() < 0.5);
             String target = byProduct ? productIds.get(randomIndex(productIds.size())) : categories.get(randomIndex(categories.size()));
@@ -290,16 +311,18 @@ final class PostgresMarketStore {
                 """)) {
                 sql.setString(1, UUID.randomUUID().toString());
                 sql.setString(2, byProduct ? target : null); sql.setString(3, byProduct ? null : target);
-                sql.setInt(4, discount); sql.setObject(5, now); sql.setObject(6, ends); sql.setObject(7, now);
+                sql.setInt(4, discount); PostgresTimestamps.bind(sql, 5, now);
+                PostgresTimestamps.bind(sql, 6, ends); PostgresTimestamps.bind(sql, 7, now);
                 return sql.executeUpdate() == 1;
             }
         });
     }
 
     void evolveDueProducts(Instant now) throws CurrencyStoreException {
+        mode.requireWritable();
         List<String> ids = transaction(connection -> {
             try (var sql = connection.prepareStatement("SELECT product_id FROM economy_market_products WHERE next_price_at<=? ORDER BY next_price_at,product_id")) {
-                sql.setObject(1, now);
+                PostgresTimestamps.bind(sql, 1, now);
                 try (var rows = sql.executeQuery()) {
                     var result = new ArrayList<String>(); while (rows.next()) result.add(rows.getString(1)); return List.copyOf(result);
                 }
@@ -311,12 +334,12 @@ final class PostgresMarketStore {
 
     List<DeseModels.Sale> activeSales(Instant now) throws CurrencyStoreException {
         return transaction(connection -> {
-            expireSales(connection, now);
+            if (!readOnly()) expireSales(connection, now);
             try (var sql = connection.prepareStatement("""
                 SELECT sale_id,product_id,category,discount_percent,starts_at,ends_at,status
                 FROM economy_market_sales WHERE status='ACTIVE' AND starts_at<=? AND ends_at>? ORDER BY starts_at DESC
                 """)) {
-                sql.setObject(1, now); sql.setObject(2, now);
+                PostgresTimestamps.bind(sql, 1, now); PostgresTimestamps.bind(sql, 2, now);
                 try (var rows = sql.executeQuery()) {
                     var result = new ArrayList<DeseModels.Sale>();
                     while (rows.next()) result.add(readSale(rows));
@@ -340,12 +363,14 @@ final class PostgresMarketStore {
                     try (var update = connection.prepareStatement("""
                         UPDATE economy_market_products SET current_price=?,updated_at=?,next_price_at=? WHERE product_id=?
                         """)) {
-                        update.setLong(1, next); update.setObject(2, now); update.setObject(3, now.plus(PRICE_PERIOD));
+                        update.setLong(1, next); PostgresTimestamps.bind(update, 2, now);
+                        PostgresTimestamps.bind(update, 3, now.plus(PRICE_PERIOD));
                         update.setString(4, id); update.executeUpdate();
                     }
                     if (next != current.currentPrice()) {
                         try (var insert = connection.prepareStatement("INSERT INTO economy_market_price_history(product_id,price,changed_at,reason) VALUES (?,?,?,'MARKET_MOVEMENT')")) {
-                            insert.setString(1, id); insert.setLong(2, next); insert.setObject(3, now); insert.executeUpdate();
+                            insert.setString(1, id); insert.setLong(2, next);
+                            PostgresTimestamps.bind(insert, 3, now); insert.executeUpdate();
                         }
                         try (var trim = connection.prepareStatement("""
                             DELETE FROM economy_market_price_history WHERE product_id=? AND history_id NOT IN
@@ -360,12 +385,13 @@ final class PostgresMarketStore {
         });
     }
 
-    private static long effectivePrice(Connection connection, DeseModels.Product product, Instant now) throws SQLException {
+    private static long effectivePrice(Connection connection, DeseModels.Product product, Instant now, boolean lock) throws SQLException {
         try (var sql = connection.prepareStatement("""
             SELECT discount_percent FROM economy_market_sales WHERE status='ACTIVE' AND starts_at<=? AND ends_at>?
-                AND (product_id=? OR category=?) ORDER BY starts_at DESC LIMIT 1 FOR UPDATE
-            """)) {
-            sql.setObject(1, now); sql.setObject(2, now); sql.setString(3, product.id()); sql.setString(4, product.category());
+                AND (product_id=? OR category=?) ORDER BY starts_at DESC LIMIT 1
+            """ + (lock ? " FOR UPDATE" : ""))) {
+            PostgresTimestamps.bind(sql, 1, now); PostgresTimestamps.bind(sql, 2, now);
+            sql.setString(3, product.id()); sql.setString(4, product.category());
             try (var rows = sql.executeQuery()) {
                 return rows.next() ? discounted(product.currentPrice(), rows.getInt(1)) : product.currentPrice();
             }
@@ -378,7 +404,8 @@ final class PostgresMarketStore {
             FROM economy_market_sales WHERE status='ACTIVE' AND starts_at<=? AND ends_at>?
                 AND (product_id=? OR category=?) ORDER BY starts_at DESC LIMIT 1 FOR UPDATE
             """)) {
-            sql.setObject(1, now); sql.setObject(2, now); sql.setString(3, product.id()); sql.setString(4, product.category());
+            PostgresTimestamps.bind(sql, 1, now); PostgresTimestamps.bind(sql, 2, now);
+            sql.setString(3, product.id()); sql.setString(4, product.category());
             try (var rows = sql.executeQuery()) { return rows.next() ? readSale(rows) : null; }
         }
     }
@@ -393,12 +420,13 @@ final class PostgresMarketStore {
 
     private static void expireSales(Connection connection, Instant now) throws SQLException {
         try (var sql = connection.prepareStatement("UPDATE economy_market_sales SET status='EXPIRED',active_slot=NULL WHERE status='ACTIVE' AND ends_at<=?")) {
-            sql.setObject(1, now); sql.executeUpdate();
+            PostgresTimestamps.bind(sql, 1, now); sql.executeUpdate();
         }
     }
 
     private <T> T transaction(SqlWork<T> work) throws CurrencyStoreException {
         try (Connection connection = database.connection()) {
+            if (readOnly()) connection.setReadOnly(true);
             boolean autoCommit = connection.getAutoCommit(); connection.setAutoCommit(false);
             try {
                 T value = work.run(connection); connection.commit(); return value;
@@ -407,12 +435,12 @@ final class PostgresMarketStore {
                 throw abort;
             } catch (Exception ex) {
                 try { connection.rollback(); } catch (SQLException ignored) { }
-                throw new CurrencyStoreException();
+                throw new CurrencyStoreException(ex);
             } finally {
                 try { connection.setAutoCommit(autoCommit); } catch (SQLException ignored) { }
             }
         } catch (PurchaseAbort abort) { throw abort; }
-        catch (SQLException ex) { throw new CurrencyStoreException(); }
+        catch (SQLException ex) { throw new CurrencyStoreException(ex); }
     }
 
     private DeseModels.Purchase priorPurchase(String interactionId) throws CurrencyStoreException {

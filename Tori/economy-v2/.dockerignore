@@ -1,0 +1,9 @@
+.git
+.elixir_ls
+_build
+deps
+cover
+test
+sql
+*.dump
+*.log

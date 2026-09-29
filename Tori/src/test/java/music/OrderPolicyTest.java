@@ -3,16 +3,28 @@ package music;
 import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 class OrderPolicyTest {
     private static TicketOrderStore.Order order(long id,String status) {
-        Instant now=Instant.parse("2026-09-25T12:00:00Z");
-        return new TicketOrderStore.Order(id,"guild","customer","design","details",null,status,now,now,null,"channel","message");
+        return order(id,status,false);
     }
     private static TicketOrderStore.Order order(long id,String status,boolean fastpass) {
         Instant now=Instant.parse("2026-09-25T12:00:00Z");
         return new TicketOrderStore.Order(id,"guild","customer","design","details",null,status,now,now,null,"channel","message","PayPal",fastpass);
+    }
+    @Test void manageServerWithoutConfiguredStaffRoleIsAllowed() {
+        assertTrue(OrderPolicy.mayManageOrders(true,false,null,Set.of()));
+    }
+    @Test void administratorWithoutConfiguredStaffRoleIsAllowed() {
+        assertTrue(OrderPolicy.mayManageOrders(false,true,null,Set.of()));
+    }
+    @Test void configuredStaffRoleAllowsMemberWithoutManageServer() {
+        assertTrue(OrderPolicy.mayManageOrders(false,false,"order-staff",Set.of("order-staff")));
+    }
+    @Test void ordinaryMemberWithoutOrderPermissionOrRoleIsDenied() {
+        assertFalse(OrderPolicy.mayManageOrders(false,false,"order-staff",Set.of("other-role")));
     }
     @Test void completedAndCancelledOrdersLeaveQueueAndPositionsRecompute() {
         var active=List.of(order(11,"PROCESSING"),order(14,"NOTED"),order(15,"NOTED"));
