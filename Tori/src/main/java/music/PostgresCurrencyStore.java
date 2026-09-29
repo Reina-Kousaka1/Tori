@@ -401,11 +401,11 @@ final class PostgresCurrencyStore implements CurrencyStore {
                 return result;
             } catch (Exception ex) {
                 try { connection.rollback(); } catch (SQLException ignored) { }
-                throw new CurrencyStoreException();
+                throw new CurrencyStoreException(ex);
             } finally {
                 try { connection.setAutoCommit(autoCommit); } catch (SQLException ignored) { }
             }
-        } catch (SQLException ex) { throw new CurrencyStoreException(); }
+        } catch (SQLException ex) { throw new CurrencyStoreException(ex); }
     }
 
     private static void ensureAccount(Connection connection, String userId) throws SQLException {
@@ -445,12 +445,16 @@ final class PostgresCurrencyStore implements CurrencyStore {
     }
 
     private static void removeItem(Connection connection, String userId, String itemId, long amount) throws SQLException {
-        try (var sql = connection.prepareStatement("UPDATE economy_inventory SET quantity=quantity-? WHERE user_id=? AND item_id=? AND quantity>=?")) {
-            sql.setLong(1, amount); sql.setString(2, userId); sql.setString(3, itemId); sql.setLong(4, amount);
-            if (sql.executeUpdate() != 1) throw new SQLException();
+        int removed;
+        try (var sql = connection.prepareStatement("DELETE FROM economy_inventory WHERE user_id=? AND item_id=? AND quantity=?")) {
+            sql.setString(1, userId); sql.setString(2, itemId); sql.setLong(3, amount);
+            removed = sql.executeUpdate();
         }
-        try (var sql = connection.prepareStatement("DELETE FROM economy_inventory WHERE user_id=? AND item_id=? AND quantity=0")) {
-            sql.setString(1, userId); sql.setString(2, itemId); sql.executeUpdate();
+        if (removed == 0) {
+            try (var sql = connection.prepareStatement("UPDATE economy_inventory SET quantity=quantity-? WHERE user_id=? AND item_id=? AND quantity>?")) {
+                sql.setLong(1, amount); sql.setString(2, userId); sql.setString(3, itemId); sql.setLong(4, amount);
+                if (sql.executeUpdate() != 1) throw new SQLException("Insufficient item quantity");
+            }
         }
         try (var sql = connection.prepareStatement("""
             DELETE FROM economy_tool_wear WHERE user_id=? AND item_id=?
