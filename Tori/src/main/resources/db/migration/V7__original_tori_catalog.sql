@@ -4,7 +4,8 @@ INSERT INTO economy_v2_catalog_items
     (item_id,name,description,category,subcategory,rarity,buy_price,rotation_weight,season,
      stackable,max_stack,consumable,equip_slots,conflict_slots,tags)
 SELECT id,name,description,category,subcategory,rarity,price,weight,season,
-       slot IS NULL, CASE WHEN slot IS NULL THEN 99 ELSE 1 END,
+       slot IS NULL AND category <> 'beauty',
+       CASE WHEN slot IS NULL AND category <> 'beauty' THEN 99 ELSE 1 END,
        category = 'consumables',
        CASE WHEN slot IS NULL THEN ARRAY[]::TEXT[] ELSE ARRAY[slot] END,
        CASE WHEN conflict = '' THEN ARRAY[]::TEXT[] ELSE string_to_array(conflict, ',') END,

@@ -6,10 +6,10 @@ defmodule ToriEconomy.Contract do
   @max_amount 9_223_372_036_854_775_807
   @mutations ["daily.claim", "wallet.transfer", "shop.purchase", "inventory.equip",
               "inventory.unequip", "progression.grant", "marketplace.list",
-              "marketplace.buy", "marketplace.cancel", "activity.perform"]
+              "marketplace.buy", "marketplace.cancel", "activity.perform", "inventory.consume"]
   @reads ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard", "profile.snapshot",
           "market.product", "market.history", "shop.rotation", "progression.snapshot",
-          "marketplace.browse"]
+          "marketplace.browse", "inventory.effects"]
   @operations @mutations ++ @reads
 
   def validate(raw) when is_map(raw) do
@@ -50,6 +50,10 @@ defmodule ToriEconomy.Contract do
   defp validate_args("shop.rotation", args), do: keys(args, [])
   defp validate_args("progression.snapshot", args), do: keys(args, [])
   defp validate_args("marketplace.browse", args), do: keys(args, [])
+  defp validate_args("inventory.effects", args), do: keys(args, [])
+  defp validate_args("inventory.consume", args) do
+    with :ok <- keys(args, ["item_id"]), :ok <- item_id(args["item_id"]), do: :ok
+  end
   defp validate_args("activity.perform", args) do
     with :ok <- keys(args, ["activity"]),
          activity when activity in ["fish", "mine", "chop"] <- args["activity"], do: :ok

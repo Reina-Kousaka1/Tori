@@ -1,6 +1,6 @@
 defmodule ToriEconomy.RewriteDomainTest do
   use ExUnit.Case, async: false
-  alias ToriEconomy.{Activity, Api, Contract, Equipment, Marketplace, Progression, Shop, Sql, TestSchema, WriteGate}
+  alias ToriEconomy.{Activity, Api, Consumables, Contract, Equipment, Marketplace, Progression, Shop, Sql, TestSchema, WriteGate}
   alias ToriEconomy.Shop.Rotation
 
   @url System.get_env("TORI_ECONOMY_TEST_DATABASE_URL")
@@ -182,6 +182,33 @@ defmodule ToriEconomy.RewriteDomainTest do
     assert result["result"]["xp"]["xp_awarded"] == "7"
     assert [[7]] = Sql.query!("SELECT xp FROM economy_v2_account_progress WHERE user_id=$1", [user]).rows
     assert [[1]] = Sql.query!("SELECT count(*) FROM economy_v2_xp_events WHERE request_key=$1", [req.idempotency_key]).rows
+  end
+
+  test "configured consumable use is persistent and replay-safe" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'practice_water',2)", [user])
+    Sql.query!("""
+      INSERT INTO economy_v2_consumable_effects(item_id,effect_code,duration_ms,active)
+      VALUES ('practice_water','test_refresh',60000,true)
+      ON CONFLICT (item_id) DO UPDATE SET effect_code='test_refresh',duration_ms=60000,active=true
+    """)
+    req = request("inventory.consume", user, %{"item_id" => "practice_water"})
+    assert {:ok, first} = Consumables.execute(req)
+    assert first["result"]["effect_code"] == "test_refresh"
+    assert {:ok, replay} = Consumables.execute(%{req | request_id: Ecto.UUID.generate()})
+    assert replay["result"] == first["result"]
+    assert [[1]] = Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='practice_water'", [user]).rows
+    assert [[1]] = Sql.query!("SELECT count(*) FROM economy_v2_active_effects WHERE user_id=$1 AND effect_code='test_refresh'", [user]).rows
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'fishing_rod',1)", [user])
+    Sql.query!("INSERT INTO economy_equipment(user_id,slot,item_id) VALUES ($1,'rod','fishing_rod')", [user])
+    Sql.query!("""
+      INSERT INTO economy_v2_activity_effect_rules(effect_code,activity,credit_bonus_percent,active)
+      VALUES ('test_refresh','fish',50,true)
+      ON CONFLICT (effect_code,activity) DO UPDATE SET credit_bonus_percent=50,active=true
+    """)
+    assert {:ok, gather} = Activity.execute(request("activity.perform", user, %{"activity" => "fish"}), fn _ -> 1 end)
+    assert gather["result"]["credits"] == "15"
   end
 
   defp restore(name, nil), do: System.delete_env(name)

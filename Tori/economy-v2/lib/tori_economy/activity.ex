@@ -44,7 +44,14 @@ defmodule ToriEconomy.Activity do
       owned < 1 or wear >= durability -> error("REQUIREMENT_NOT_MET")
       true ->
         tier = Policy.tier(durability)
-        credit_reward = Policy.credits(tier, random.(16 * tier) - 1)
+        base_reward = Policy.credits(tier, random.(16 * tier) - 1)
+        [[bonus_percent]] = Sql.query!("""
+          SELECT coalesce(max(r.credit_bonus_percent),0)
+          FROM economy_v2_active_effects e
+          JOIN economy_v2_activity_effect_rules r ON r.effect_code=e.effect_code
+          WHERE e.user_id=$1 AND e.expires_at>now() AND r.activity=$2 AND r.active
+        """, [user, activity]).rows
+        credit_reward = base_reward + div(base_reward * bonus_percent, 100)
         drop_id = Policy.drop(activity, tier, random.(100) - 1)
         if balance > 9_223_372_036_854_775_807 - credit_reward do
           error("REQUIREMENT_NOT_MET")

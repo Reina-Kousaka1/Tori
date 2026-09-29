@@ -143,7 +143,7 @@ defmodule ToriEconomy.Api do
 
   # A running API is not permission to create a second wallet writer.
   defp writes_allowed(%{operation: operation})
-       when operation in ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard", "profile.snapshot", "market.product", "market.history", "shop.rotation", "progression.snapshot", "marketplace.browse"],
+       when operation in ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard", "profile.snapshot", "market.product", "market.history", "shop.rotation", "progression.snapshot", "marketplace.browse", "inventory.effects"],
        do: :ok
 
   defp writes_allowed(request) do

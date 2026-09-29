@@ -163,6 +163,10 @@ defmodule ToriEconomy.TestSchema do
       raise "Incomplete Tori test schema: legacy activity catalog is missing or incompatible"
     end
 
+    unless "economy_v2_active_effects" in public_tables() do
+      raise "Incomplete Tori test schema: consumable effect state is missing"
+    end
+
     :ok
   end
 end

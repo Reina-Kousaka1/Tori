@@ -1,6 +1,6 @@
 defmodule ToriEconomy.Dispatcher do
   @moduledoc "Transport-neutral command boundary. Discord adapters must validate then call here."
-  alias ToriEconomy.{Accounts, Activity, Equipment, Market, Marketplace, Persona, Progression, Queries, Shop}
+  alias ToriEconomy.{Accounts, Activity, Consumables, Equipment, Market, Marketplace, Persona, Progression, Queries, Shop}
 
   def execute(request) do
     result = case request.operation do
@@ -9,6 +9,7 @@ defmodule ToriEconomy.Dispatcher do
       operation when operation in ["inventory.equip", "inventory.unequip"] -> Equipment.execute(request)
       operation when operation in ["progression.snapshot", "progression.grant"] -> Progression.execute(request)
       "activity.perform" -> Activity.execute(request)
+      operation when operation in ["inventory.consume", "inventory.effects"] -> Consumables.execute(request)
       "marketplace." <> _ -> Marketplace.execute(request)
       operation when operation in ["inventory.list", "shop.catalog", "wallet.leaderboard", "profile.snapshot"] -> Queries.execute(request)
       _ -> Accounts.execute(request)
