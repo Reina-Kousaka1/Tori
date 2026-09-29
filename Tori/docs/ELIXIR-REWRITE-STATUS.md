@@ -24,7 +24,9 @@ Elixir domain increment. It is not a production cutover approval.
 - `ToriEconomy.Persona.Mood` is a supervised OTP process with one transient
   bot-wide state. Its pure transition and decay functions can be tested without
   Discord or PostgreSQL. Guild-local state can be layered later; no persistent
-  mood or cross-instance synchronization is claimed.
+  mood or cross-instance synchronization is claimed. An authenticated internal
+  snapshot endpoint and allowlisted event endpoint provide the adapter
+  boundary; Java does not call them yet.
 - `ToriEconomy.Persona.Season` resolves deterministic calendar/event overlays
   from an injected date. `ToriEconomy.Persona` renders semantic response keys
   from structured variables. Moderation, administration and system contexts

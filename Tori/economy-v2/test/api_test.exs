@@ -4,6 +4,7 @@ defmodule ToriEconomy.ApiTest do
   import Plug.Conn
 
   alias ToriEconomy.Api
+  alias ToriEconomy.Persona.Mood
 
   setup do
     previous = System.get_env("TORI_ECONOMY_API_SECRET")
@@ -18,6 +19,60 @@ defmodule ToriEconomy.ApiTest do
     response = conn(:post, "/internal/economy/v1/execute", "not json") |> Api.call([])
     assert response.status == 401
     assert Jason.decode!(response.resp_body)["error"]["code"] == "FORBIDDEN"
+  end
+
+  test "private persona snapshot and allowlisted mood events need no Discord connection" do
+    Mood.reset()
+    on_exit(fn -> Mood.reset() end)
+
+    anonymous = conn(:get, "/internal/persona/v1/snapshot") |> Api.call([])
+    assert anonymous.status == 401
+
+    event =
+      conn(:post, "/internal/persona/v1/events", Jason.encode!(%{"event" => "volleyball_match"}))
+      |> put_req_header("authorization", "Bearer " <> String.duplicate("s", 32))
+      |> put_req_header("content-type", "application/json")
+      |> Api.call([])
+
+    assert event.status == 200
+    assert Jason.decode!(event.resp_body)["mood"] == "competitive"
+
+    snapshot =
+      conn(:get, "/internal/persona/v1/snapshot")
+      |> put_req_header("authorization", "Bearer " <> String.duplicate("s", 32))
+      |> Api.call([])
+
+    assert snapshot.status == 200
+    assert Jason.decode!(snapshot.resp_body)["mood"] == "competitive"
+
+    invalid =
+      conn(:post, "/internal/persona/v1/events", Jason.encode!(%{"event" => "not_allowed"}))
+      |> put_req_header("authorization", "Bearer " <> String.duplicate("s", 32))
+      |> put_req_header("content-type", "application/json")
+      |> Api.call([])
+
+    assert invalid.status == 400
+    assert Mood.snapshot().mood == :competitive
+  end
+
+  test "private persona rendering uses structured values and keeps serious copy neutral" do
+    Mood.reset()
+    Mood.record(:rare_drop)
+    on_exit(fn -> Mood.reset() end)
+
+    render = fn context ->
+      conn(:post, "/internal/persona/v1/render",
+        Jason.encode!(%{"key" => "shop.purchase.success", "context" => context,
+                        "variables" => %{"item_name" => "Bow", "amount" => 20}}))
+      |> put_req_header("authorization", "Bearer " <> String.duplicate("s", 32))
+      |> put_req_header("content-type", "application/json")
+      |> Api.call([])
+    end
+
+    assert Jason.decode!(render.("shop").resp_body)["text"] =~ "✨"
+    assert Jason.decode!(render.("administration").resp_body)["text"] ==
+             "Purchased Bow for 20 Credits."
+    assert render.("unknown").status == 400
   end
 
   test "malformed and numeric-snowflake requests are rejected without a write" do

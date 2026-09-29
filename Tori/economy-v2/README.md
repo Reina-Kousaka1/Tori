@@ -19,7 +19,13 @@ it, and no unimplemented XP or career values are fabricated.
 The Elixir persona foundation contains a supervised, transient global mood,
 deterministic seasonal overlays and semantic response rendering. It is
 presentation-only: no economy decision or Discord command currently depends
-on it. See `../docs/ELIXIR-REWRITE-STATUS.md` for ownership and remaining work.
+on it. The private authenticated `GET /internal/persona/v1/snapshot` and
+`POST /internal/persona/v1/events` endpoints expose the current state and
+accept only predefined event names. `POST /internal/persona/v1/render` returns
+a phrase from a semantic key, validated context and structured variables.
+These endpoints do not start a second Discord
+gateway or change Java's command routing. See
+`../docs/ELIXIR-REWRITE-STATUS.md` for ownership and remaining work.
 
 Routing can be set centrally, for example:
 

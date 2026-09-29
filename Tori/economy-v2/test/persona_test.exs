@@ -31,6 +31,11 @@ defmodule ToriEconomy.PersonaTest do
     assert Season.current(~D[2026-07-01], :unrecognized) == :summer
   end
 
+  test "only configured event names resolve without creating atoms" do
+    assert Mood.event_from_name("rare_drop") == {:ok, :rare_drop}
+    assert Mood.event_from_name("made_up_event") == :error
+  end
+
   test "persona phrases receive structured values and serious contexts stay factual" do
     mood = %{mood: :happy, intensity: 0.8}
     playful = Persona.snapshot(context: :economy, mood: mood, date: ~D[2026-04-01])

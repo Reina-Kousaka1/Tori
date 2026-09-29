@@ -3,7 +3,8 @@ defmodule ToriEconomy.Api do
   import Plug.Conn
   require Logger
 
-  alias ToriEconomy.{Accounts, Contract, Market, Queries, Sql, WriteGate}
+  alias ToriEconomy.{Accounts, Contract, Market, Persona, Queries, Sql, WriteGate}
+  alias ToriEconomy.Persona.Mood
 
   def init(opts), do: opts
 
@@ -20,8 +21,72 @@ defmodule ToriEconomy.Api do
       {"POST", "/internal/economy/v1/execute"} ->
         execute(conn)
 
+      {"GET", "/internal/persona/v1/snapshot"} ->
+        persona_snapshot(conn)
+
+      {"POST", "/internal/persona/v1/events"} ->
+        persona_event(conn)
+
+      {"POST", "/internal/persona/v1/render"} ->
+        persona_render(conn)
+
       _ ->
         reply(conn, 404, error(nil, "INVALID_INPUT", false))
+    end
+  end
+
+  defp persona_snapshot(conn) do
+    case authorized(conn) do
+      :ok ->
+        state = Persona.snapshot()
+        reply(conn, 200, %{"identity" => "tori", "mood" => Atom.to_string(state.mood),
+                           "intensity" => state.intensity, "season" => Atom.to_string(state.season)})
+
+      _ -> reply(conn, 401, error(nil, "FORBIDDEN", false))
+    end
+  end
+
+  defp persona_event(conn) do
+    with :ok <- authorized(conn),
+         :ok <- json_content_type(conn),
+         {:ok, body, conn} <- read_body(conn, length: 1024),
+         {:ok, %{"event" => name} = payload} <- Jason.decode(body),
+         true <- map_size(payload) == 1,
+         {:ok, event} <- Mood.event_from_name(name),
+         {:ok, state} <- record_mood_event(event) do
+      reply(conn, 200, %{"status" => "ok", "mood" => Atom.to_string(state.mood),
+                         "intensity" => state.intensity})
+    else
+      {:error, "UNAUTHORIZED"} -> reply(conn, 401, error(nil, "FORBIDDEN", false))
+      {:error, :unavailable} -> reply(conn, 503, error(nil, "SERVICE_UNAVAILABLE", true))
+      _ -> reply(conn, 400, error(nil, "INVALID_INPUT", false))
+    end
+  end
+
+  defp record_mood_event(event) do
+    {:ok, Mood.record(event)}
+  catch
+    :exit, _ -> {:error, :unavailable}
+  end
+
+  defp persona_render(conn) do
+    with :ok <- authorized(conn),
+         :ok <- json_content_type(conn),
+         {:ok, body, conn} <- read_body(conn, length: 2048),
+         {:ok, %{"key" => key, "context" => context_name, "variables" => variables} = payload} <- Jason.decode(body),
+         true <- map_size(payload) == 3 and is_binary(key) and byte_size(key) <= 100 and
+                   Regex.match?(~r/^[a-z]+(?:\.[a-z_]+)*$/, key),
+         true <- is_map(variables) and map_size(variables) <= 12,
+         true <- Enum.all?(variables, fn {name, value} ->
+           is_binary(name) and byte_size(name) <= 40 and
+             ((is_binary(value) and byte_size(value) <= 256) or is_integer(value))
+         end),
+         {:ok, context} <- Persona.context_from_name(context_name) do
+      phrase = Persona.render(key, variables, Persona.snapshot(context: context))
+      reply(conn, 200, %{"status" => "ok", "text" => phrase})
+    else
+      {:error, "UNAUTHORIZED"} -> reply(conn, 401, error(nil, "FORBIDDEN", false))
+      _ -> reply(conn, 400, error(nil, "INVALID_INPUT", false))
     end
   end
 

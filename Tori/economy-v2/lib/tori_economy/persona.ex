@@ -21,6 +21,14 @@ defmodule ToriEconomy.Persona do
     "system.error" => %{neutral: "Something went wrong. Please try again."}
   }
 
+  def context_from_name(name) when is_binary(name) do
+    Enum.find_value(@contexts, :error, fn context ->
+      if Atom.to_string(context) == name, do: {:ok, context}, else: false
+    end)
+  end
+
+  def context_from_name(_), do: :error
+
   def snapshot(opts \\ []) do
     context = Keyword.get(opts, :context, :general)
     context = if context in @contexts, do: context, else: :general

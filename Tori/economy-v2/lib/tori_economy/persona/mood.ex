@@ -30,6 +30,17 @@ defmodule ToriEconomy.Persona.Mood do
   def record(event, server \\ __MODULE__, now_ms \\ System.system_time(:millisecond)),
     do: GenServer.call(server, {:record, event, now_ms})
 
+  def reset(server \\ __MODULE__, now_ms \\ System.system_time(:millisecond)),
+    do: GenServer.call(server, {:reset, now_ms})
+
+  def event_from_name(name) when is_binary(name) do
+    Enum.find_value(@events, :error, fn {event, _} ->
+      if Atom.to_string(event) == name, do: {:ok, event}, else: false
+    end)
+  end
+
+  def event_from_name(_), do: :error
+
   def resolve(%__MODULE__{} = state, now_ms) when is_integer(now_ms) do
     if state.expires_at_ms && now_ms >= state.expires_at_ms do
       new(now_ms)
@@ -37,7 +48,7 @@ defmodule ToriEconomy.Persona.Mood do
       remaining =
         if state.expires_at_ms do
           duration = state.expires_at_ms - state.started_at_ms
-          max(0.0, (state.expires_at_ms - now_ms) / duration)
+          min(1.0, max(0.0, (state.expires_at_ms - now_ms) / duration))
         else
           1.0
         end
@@ -67,5 +78,10 @@ defmodule ToriEconomy.Persona.Mood do
   def handle_call({:record, event, now_ms}, _from, state) do
     next = transition(state, event, now_ms)
     {:reply, resolve(next, now_ms), next}
+  end
+
+  def handle_call({:reset, now_ms}, _from, _state) do
+    next = new(now_ms)
+    {:reply, next, next}
   end
 end
