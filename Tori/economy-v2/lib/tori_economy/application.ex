@@ -7,10 +7,10 @@ defmodule ToriEconomy.Application do
   @impl true
   def start(_type, _args) do
     children =
-      cond do
-        @test_environment -> test_children()
-        System.get_env("TORI_ECONOMY_API_ENABLED") == "true" -> api_children()
-        true -> []
+      if @test_environment do
+        test_children()
+      else
+        if System.get_env("TORI_ECONOMY_API_ENABLED") == "true", do: api_children(), else: []
       end
 
     Supervisor.start_link(children, strategy: :one_for_one, name: ToriEconomy.Supervisor)
