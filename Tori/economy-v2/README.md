@@ -60,8 +60,12 @@ gate in the Pi guide has been completed.
 - Isolated PostgreSQL tests require `TORI_ECONOMY_TEST_DATABASE_URL` to point
   to a dedicated database ending in `_test`. Under `MIX_ENV=test`, the
   application starts its Repo from this URL and ignores production database
-  settings; without it, database integration tests are skipped. Never use
-  production credentials or data for these tests.
+  settings. `mix test` applies Toris V1–V5 Flyway SQL files to a fresh, empty
+  test schema before running the integration tests; an incomplete nonempty
+  schema fails verification instead of being silently modified. The target
+  URL, supervised Repo configuration and connected database name are checked
+  before any schema write. Without the test URL, database integration tests
+  are skipped. Never use production credentials or data for these tests.
 - Java-to-Elixir integration tests also require the local test API secret and
   `TORI_ECONOMY_TEST_WRITE_ENABLED=YES`.
 
