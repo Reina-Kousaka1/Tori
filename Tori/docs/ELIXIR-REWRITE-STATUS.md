@@ -1,59 +1,63 @@
-# Tori Java/Elixir rewrite: current ownership
+# Tori Java/Elixir rewrite: implementation and ownership
 
-This document records the inspected code paths and the scope of the first
-Elixir domain increment. It is not a production cutover approval.
+This is an implementation status, **not** a production cutover authorization. All new V2 writes are disabled in the shipped Compose configuration and Java routing remains `LEGACY`.
 
-## Current architecture
+```mermaid
+flowchart LR
+  Discord --> JDA[Java / JDA commands and music]
+  JDA --> Legacy[Legacy economy and market writers]
+  JDA -. optional private API .-> API[Elixir / Bandit]
+  API --> Gate[WriteGate]
+  Gate --> Domain[Shop, Inventory, Progression, Marketplace]
+  API --> Persona[OTP Mood and Persona]
+  Legacy --> PG[(One Tori PostgreSQL)]
+  Domain --> PG
+  JDA --> Presence[Java status rotation]
+```
 
-- `music.CommandListener` and `music.CommandRegistration` own Java/JDA slash
-  commands. `EconomyRouting` defaults every area to `LEGACY`; only selected
-  reads, daily and transfer have optional Elixir routes.
-- `PostgresCurrencyStore`, `PostgresMarketStore`, `ShopCatalog` and their
-  policies still own the legacy shop, wallet, inventory, fishing, mining,
-  chopping and market rules. `StatusRotation` and `ToriPersona` own Java
-  presence/persona behavior. Moderation stays in its existing Java paths.
-- Flyway V1–V5 defines the one PostgreSQL schema. V2 provides the existing
-  global wallet, inventory, equipment and market tables; V3 adds activity
-  cooldowns; V5 adds Elixir transaction, ledger and activity support.
-- The Elixir API reads those existing tables and has explicitly gated daily
-  and transfer writes. The Docker Compose service is internal and points to
-  the same `tori_main` database as Java. Its default write mode is `disabled`.
+## Implemented behind the gate
 
-## Added Elixir foundation
+- V6 extends the existing V5 catalog and adds persisted rotations, fashion loadout, XP and career structures, and escrowed marketplace listings. V7 seeds an original, generic catalog spanning fashion, accessories, beauty, ballet, volleyball, cheer, consumables, collectibles, and seasonal items. Inserts preserve existing catalog edits and inventory.
+- `shop.rotation` selects a weighted, deterministic, season-aware drop once per period and persists its item, price and stock snapshots. Reads of an existing period are stable. First creation is a guarded write and therefore unavailable when writes are disabled.
+- `shop.purchase` locks the global wallet and rotation stock, validates ownership and configured level requirement, then debits credits, grants to the **existing** `economy_inventory`, writes wallet/inventory events and stores the idempotent result in one PostgreSQL transaction.
+- `inventory.equip`/`inventory.unequip` use the same inventory ownership and V6 fashion slots. Existing rod/pickaxe/axe/wrench equipment remains in legacy tables.
+- `progression.snapshot` reads persisted XP and career state. `progression.grant` accepts **only explicitly configured active** XP sources and uses persisted cooldowns, idempotency and career XP events. No production XP curve, reward values or activity XP sources are invented or enabled.
+- `marketplace.browse` reads active user listings. Listing escrows an existing owned item; buying settles global wallet balances, delivers the escrowed item and writes both ledger legs atomically. Seller cancellation returns escrow, including after expiry. Java's existing dynamic market is separate and stays Java-owned.
+- `profile.snapshot` now includes existing fish/mine/chop timestamps and the fashion loadout. It does not pretend that legacy activity rewards are Elixir-owned.
+- Persona has a supervised transient mood process, deterministic seasonal overlay and semantic, neutral-fallback rendering API. Domain outcomes carry presentation keys but no Discord markup. Java commands/presence remain unaffected.
 
-- `ToriEconomy.Persona.Mood` is a supervised OTP process with one transient
-  bot-wide state. Its pure transition and decay functions can be tested without
-  Discord or PostgreSQL. Guild-local state can be layered later; no persistent
-  mood or cross-instance synchronization is claimed. An authenticated internal
-  snapshot endpoint and allowlisted event endpoint provide the adapter
-  boundary; Java does not call them yet.
-- `ToriEconomy.Persona.Season` resolves deterministic calendar/event overlays
-  from an injected date. `ToriEconomy.Persona` renders semantic response keys
-  from structured variables. Moderation, administration and system contexts
-  use neutral wording. Rendering never changes transaction results.
-- `profile.snapshot` reads actual balance, inventory and existing tool
-  equipment from V2 tables. It omits XP, careers, fashion loadout and
-  achievements because those states do not exist yet. It is an internal API
-  read, not a migrated `/profile` Discord command.
-- `ToriEconomy.Progression.Policy` can derive a level from an explicitly
-  supplied, validated threshold curve. The numeric values in its tests are
-  fixtures only. No XP source, runtime curve, level reward or writer is active.
-- `ToriEconomy.Market` can read existing product details and price history
-  from the V2 Java-owned tables. It never creates quotes or performs market
-  maintenance. Market purchases, sales, scheduler ownership and Java routing
-  remain unchanged.
+## Gates and explicit limitations
 
-## Ownership and cutover boundaries
+`WriteGate` permits new mutations only in explicit `test` mode against a connected `*_test` database. Its production allowlist remains restricted to the previously reviewed daily/transfer operations; V2 shop, XP, inventory, rotation and marketplace cannot be enabled in production through environment variables. `disabled` rejects every mutation even with `WRITE_ENABLED=true`. No Java command has been routed to the new operations.
 
-Java remains the sole production writer for shop, inventory, market,
-activities and all legacy commands. Elixir production writes remain gated;
-`TORI_ECONOMY_ROUTING` remains `LEGACY` by default. No Nostrum gateway is
-started alongside JDA. Moving a Discord command requires a deliberate gateway
-and interaction-ownership plan, then tests without a live Discord connection.
+The proposed Java-to-Elixir transfer for purchases, inventory, XP and marketplace is **not ready**. `PostgresCurrencyStore`, `PostgresMarketStore`, activity and shop commands still mutate wallet/inventory in Java. No Nostrum gateway or separate Discord command registration is started; starting one with the same bot token before explicit command/event ownership would duplicate Discord consumers. Existing Java presence remains the single status owner. Fishing/mining/chopping progression is read from existing timestamps only; rewards, tools, RNG and cooldown mutations remain Java-owned. Moderation remains Java-owned.
 
-The larger catalog, persisted rotations, clothing loadouts, cosmetics,
-marketplace, progression, careers and activity migration require additive
-schema design against real V1–V5 tables and migration tests before deployment.
-They are **not implemented** by this increment. A future writer transfer must
-first pass backup/restore verification, parity, idempotency, concurrency and
-exclusive-ownership gates. No parallel permanent database is planned.
+Migrations V6–V7 are additive but Flyway applies them automatically when a new Java image starts. Before deploying that image: back up the real DB, restore to a separate database, verify counts/sums and Flyway state, run migration and integration tests on that restore, and verify the catalog IDs against legacy inventory. Do not use the isolated test DB as a second persistent runtime database. Never enable an Elixir wallet or inventory writer while any Java command or market path can write the same rows.
+
+## Pi verification commands
+
+From the repository's `Tori` directory:
+
+```sh
+git diff --check
+read -rsp 'Disposable test DB password: ' TORI_TEST_DB_PASSWORD; echo
+export TORI_TEST_DB_PASSWORD
+docker run -d --name tori-economy-test-pg -p 127.0.0.1:5433:5432 \
+  -e POSTGRES_USER=tori_test -e POSTGRES_PASSWORD -e POSTGRES_DB=tori_economy_test postgres:17
+until docker exec tori-economy-test-pg pg_isready -U tori_test -d tori_economy_test; do sleep 1; done
+export TORI_ECONOMY_TEST_DATABASE_URL="postgresql://tori_test:${TORI_TEST_DB_PASSWORD}@127.0.0.1:5433/tori_economy_test"
+cd economy-v2
+mix deps.get
+mix format --check-formatted
+mix compile --warnings-as-errors
+mix test
+cd ..
+./gradlew clean test build --no-daemon
+docker compose config --quiet
+```
+
+The disposable container has no volume. Its DB is isolated from Compose's `tori_main`. The test harness applies the real Flyway V1–V7 SQL to a fresh empty `*_test` database and refuses any other target. Use a disposable password without URL-special characters for this command, or URL-encode it. After verification, remove only the explicitly named test container with `docker rm -f tori-economy-test-pg`; do not touch the Tori Compose database. These commands are **not yet verified in this Windows environment** because Mix, Gradle dependency download, Docker and a test PostgreSQL instance are unavailable here. Do not push or deploy this stack until these checks pass and test failures are fixed.
+
+When Pi tests are green, inspect `git status`, rerun `git diff --check` and `git log --oneline origin/main..main`, then push normally with `git push origin main`. Never force-push. If formatting changes files, commit those changes and rerun tests first.
+
+If the Pi must test this still-unpushed stack, transfer it as a Git bundle instead of pushing untested commits. On the development machine run `git bundle create tori-rewrite.bundle origin/main..main` and copy that file to the Pi. On a **clean** Pi `main` at the same `origin/main` base, run `git fetch /path/to/tori-rewrite.bundle main` then `git merge --ff-only FETCH_HEAD`; this does not create a feature branch or change production services. Verify `git status --short` first and preserve any local Pi changes before merging. Then run the checks above. A bundle is a transfer artifact, not a second repository or database.

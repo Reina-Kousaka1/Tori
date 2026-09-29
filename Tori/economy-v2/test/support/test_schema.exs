@@ -146,6 +146,19 @@ defmodule ToriEconomy.TestSchema do
       raise "Incomplete Tori test schema: economy account cooldown columns are missing"
     end
 
+    catalog_columns =
+      SQL.query!(Repo, "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'economy_v2_catalog_items'", []).rows
+      |> Enum.map(&hd/1)
+
+    unless Enum.all?(["subcategory", "rarity", "rotation_weight", "equip_slots", "max_stack"],
+             &(&1 in catalog_columns)) do
+      raise "Incomplete Tori test schema: additive catalog columns are missing"
+    end
+
+    unless SQL.query!(Repo, "SELECT count(*) FROM economy_v2_catalog_items WHERE item_id='leopard_baby_tee'", []).rows == [[1]] do
+      raise "Incomplete Tori test schema: original catalog seed is missing"
+    end
+
     :ok
   end
 end
