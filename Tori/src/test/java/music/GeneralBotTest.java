@@ -9,6 +9,7 @@ import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.TeamMember;
 import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.channel.unions.MessageChannelUnion;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
@@ -27,6 +28,10 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
+import java.net.ServerSocket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -42,6 +47,25 @@ class GeneralBotTest {
     private static final long OWNER = 123456789012345678L;
     private static final long CALLER = 223456789012345678L;
     private static final long TEAM_OWNER = 323456789012345678L;
+
+    @Test void elixirBalanceFailureDoesNotDisableUnrelatedCommands() throws Exception {
+        int unusedPort;
+        try (var socket = new ServerSocket(0)) { unusedPort = socket.getLocalPort(); }
+        var client = new EconomyV2Client(HttpClient.newHttpClient(),
+            URI.create("http://127.0.0.1:" + unusedPort),
+            "test-secret-with-at-least-32-characters", Duration.ofMillis(200));
+        CurrencyStore currency = stub(CurrencyStore.class, (proxy, method, args) -> switch (method.getName()) {
+            case "balance" -> 99L;
+            default -> throw unexpected(method);
+        });
+        var fixture = new Fixture();
+        try (var bot = bot(new StatusRotation()).withCurrency(currency).withEconomyV2Balance(client)) {
+            var error = assertThrows(UserError.class,
+                () -> bot.handle(fixture.event("balance", CALLER), Language.EN));
+            assertEquals("economy.unavailable", error.getMessage());
+            assertTrue(bot.handle(fixture.event("ping", CALLER), Language.EN).contains("Bot (REST): 84 ms"));
+        }
+    }
 
     @TempDir Path directory;
 
@@ -530,6 +554,7 @@ class GeneralBotTest {
                 default -> throw unexpected(method);
             });
             var guild = stub(Guild.class, (proxy, method, args) -> switch (method.getName()) {
+                case "getId" -> "234567890123456789";
                 case "getOwnerIdLong" -> guildOwnerAndAdministrator ? callerId : OWNER;
                 case "getOwnerId" -> Long.toString(guildOwnerAndAdministrator ? callerId : OWNER);
                 case "getMember" -> member;
@@ -541,6 +566,10 @@ class GeneralBotTest {
                 case "getUser" -> user(callerId);
                 case "getMember" -> member;
                 case "getGuild" -> guild;
+                case "getChannel" -> stub(MessageChannelUnion.class, (p, m, a) -> switch (m.getName()) {
+                    case "getId" -> "345678901234567890";
+                    default -> throw unexpected(m);
+                });
                 case "getJDA" -> jda;
                 case "getOptions" -> List.copyOf(options.values());
                 case "getOption" -> args.length == 1 ? options.get(args[0]) : InvocationHandler.invokeDefault(proxy, method, args);

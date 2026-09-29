@@ -4,6 +4,7 @@ import io.github.cdimascio.dotenv.Dotenv;
 import io.github.cdimascio.dotenv.DotenvException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.net.URI;
 import java.util.Base64;
 import java.util.List;
 
@@ -77,11 +78,30 @@ public final class BotConfig {
     }
     public String get(String name, String fallback) { return values.get(name, fallback); }
 
+    EconomyV2Client economyV2BalanceClient() {
+        String source = get("TORI_ECONOMY_BALANCE_SOURCE", "LEGACY");
+        if ("LEGACY".equals(source)) return null;
+        if (!"ELIXIR".equals(source))
+            throw new ConfigurationException("TORI_ECONOMY_BALANCE_SOURCE must be LEGACY or ELIXIR.");
+        URI url;
+        try { url = URI.create(get("TORI_ECONOMY_URL", "http://127.0.0.1:4001")); }
+        catch (IllegalArgumentException ex) { throw new ConfigurationException("TORI_ECONOMY_URL is invalid."); }
+        if (!"http".equals(url.getScheme()) || url.getUserInfo() != null || url.getQuery() != null ||
+                url.getFragment() != null || !"".equals(url.getPath()) && !"/".equals(url.getPath()) ||
+                !java.util.Set.of("127.0.0.1", "localhost", "[::1]").contains(url.getHost()))
+            throw new ConfigurationException("TORI_ECONOMY_URL must be a local HTTP origin.");
+        String secret = required("TORI_ECONOMY_API_SECRET");
+        if (secret.length() < 32)
+            throw new ConfigurationException("TORI_ECONOMY_API_SECRET must have at least 32 characters.");
+        return new EconomyV2Client(java.net.http.HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(2)).build(), url, secret);
+    }
+
     String redactSensitive(String text) {
         String safe = text;
         for (String key : List.of("DISCORD_TOKEN", "LAVALINK_PASSWORD", "TORI_DATABASE_PASSWORD",
             "TORI_POSTGRES_PASSWORD", "SPOTIFY_CLIENT_SECRET", "YOUTUBE_API_KEY", "MODLOG_WEBHOOK_URL",
-            "TORI_DATABASE_URL", "LAVALINK_URI")) {
+            "TORI_DATABASE_URL", "LAVALINK_URI", "TORI_ECONOMY_API_SECRET")) {
             String value = get(key);
             if (value != null && value.length() >= 4) safe = safe.replace(value, "[REDACTED:" + key + "]");
         }

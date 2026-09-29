@@ -71,6 +71,25 @@ class BotConfigTest {
         assertEquals(System.getenv(key), BotConfig.load(directory).required(key));
     }
 
+    @Test void economyV2BalanceIsOptInAndRestrictedToLocalHttp() throws Exception {
+        Files.writeString(directory.resolve(".env"), ""
+            + "TORI_ECONOMY_BALANCE_SOURCE=LEGACY\n");
+        assertNull(BotConfig.load(directory).economyV2BalanceClient());
+
+        Files.writeString(directory.resolve(".env"), ""
+            + "TORI_ECONOMY_BALANCE_SOURCE=ELIXIR\n"
+            + "TORI_ECONOMY_URL=http://127.0.0.1:4001\n"
+            + "TORI_ECONOMY_API_SECRET=local-test-secret-with-at-least-32-characters\n");
+        assertNotNull(BotConfig.load(directory).economyV2BalanceClient());
+
+        Files.writeString(directory.resolve(".env"), ""
+            + "TORI_ECONOMY_BALANCE_SOURCE=ELIXIR\n"
+            + "TORI_ECONOMY_URL=https://example.invalid\n"
+            + "TORI_ECONOMY_API_SECRET=local-test-secret-with-at-least-32-characters\n");
+        assertThrows(BotConfig.ConfigurationException.class,
+            () -> BotConfig.load(directory).economyV2BalanceClient());
+    }
+
     @Test void blankRequiredValuesAreRejected() throws Exception {
         Files.writeString(directory.resolve(".env"), "BOT_CONFIG_TEST_EMPTY=\nBOT_CONFIG_TEST_BLANK=\"   \"\n");
         var config = BotConfig.load(directory);

@@ -35,6 +35,7 @@ public final class GeneralBot extends CommandListener {
     private final Clock clock;
     private BotStore statsStore;
     private CurrencyStore currency;
+    private EconomyV2Client economyV2Balance;
     private PostgresMarketStore market;
     private ToriPersona persona = ToriPersona.defaults();
     private String creator;
@@ -42,6 +43,7 @@ public final class GeneralBot extends CommandListener {
     GeneralBot withPrefixes(PrefixSettings prefixes) { this.prefixes = prefixes; return this; }
     GeneralBot withPersona(ToriPersona persona) { this.persona = Objects.requireNonNull(persona); return this; }
     GeneralBot withCurrency(CurrencyStore currency) { this.currency = Objects.requireNonNull(currency); return this; }
+    GeneralBot withEconomyV2Balance(EconomyV2Client client) { this.economyV2Balance = Objects.requireNonNull(client); return this; }
     GeneralBot withMarket(PostgresMarketStore market) { this.market = Objects.requireNonNull(market); return this; }
     GeneralBot withShutdown(Runnable shutdown) { this.shutdown = Objects.requireNonNull(shutdown); return this; }
     GeneralBot withStats(BotStore store, String creator) {
@@ -255,7 +257,21 @@ public final class GeneralBot extends CommandListener {
                 case "balance" -> {
                     var selected = event.getOption("user");
                     var user = selected == null ? event.getUser() : selected.getAsUser();
-                    yield Messages.text(language, "balance.result", user.getEffectiveName(), currency.balance(user.getId()));
+                    long balance;
+                    if (economyV2Balance == null) {
+                        balance = currency.balance(user.getId());
+                    } else {
+                        try {
+                            balance = economyV2Balance.balance(userId, event.getGuild().getId(),
+                                event.getChannel().getId(), user.getId());
+                        } catch (InterruptedException ex) {
+                            Thread.currentThread().interrupt();
+                            throw new UserError("economy.unavailable");
+                        } catch (IOException | IllegalArgumentException ex) {
+                            throw new UserError("economy.unavailable");
+                        }
+                    }
+                    yield Messages.text(language, "balance.result", user.getEffectiveName(), balance);
                 }
                 case "daily" -> {
                     var selected = event.getOption("user");
