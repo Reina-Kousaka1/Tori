@@ -56,6 +56,21 @@ CREATE TABLE economy_v2_inventory_events (
     UNIQUE (request_key, leg)
 );
 CREATE INDEX economy_v2_inventory_user_item_idx ON economy_v2_inventory_events(user_id, item_id, event_id DESC);
+CREATE UNIQUE INDEX economy_v2_inventory_opening_idx
+    ON economy_v2_inventory_events(user_id, item_id) WHERE reason_code = 'OPENING_INVENTORY';
+
+CREATE TABLE economy_v2_tool_wear (
+    user_id TEXT NOT NULL REFERENCES economy_accounts(user_id) ON DELETE RESTRICT,
+    item_id TEXT NOT NULL CHECK (item_id ~ '^[a-z0-9_-]{1,64}$'),
+    used INTEGER NOT NULL CHECK (used >= 0),
+    PRIMARY KEY (user_id, item_id)
+);
+CREATE TABLE economy_v2_equipment (
+    user_id TEXT NOT NULL REFERENCES economy_accounts(user_id) ON DELETE RESTRICT,
+    slot TEXT NOT NULL CHECK (slot IN ('rod', 'pickaxe', 'axe', 'wrench')),
+    item_id TEXT NOT NULL CHECK (item_id ~ '^[a-z0-9_-]{1,64}$'),
+    PRIMARY KEY (user_id, slot)
+);
 
 CREATE TABLE economy_v2_activity_state (
     user_id TEXT NOT NULL REFERENCES economy_accounts(user_id) ON DELETE RESTRICT,
