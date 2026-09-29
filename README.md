@@ -34,7 +34,7 @@ Java owns the live JDA commands, music/Lavalink integration, moderation, tickets
 
 The original 66-item catalog is expanded by V10 with 61 additional seed definitions spanning Fashion, Accessories, Beauty, Ballet, Volleyball, Cheer and Seasonal styles; existing stable IDs are preserved, and the isolated migration test requires at least 125 active catalog items. The domain supports weighted, season-aware drops persisted for a period, category/page browsing, item inspection, ownership and unlock state, atomic purchases against the existing wallet and inventory, clothing loadouts, permanent cosmetic selections, configured consumable effects, and escrow marketplace operations. Fishing, mining and chopping have gated Elixir parity paths that reuse legacy tools and cooldowns; Java still owns their live execution.
 
-Progression includes a database-seeded level curve, idempotent/cooldown-controlled XP grants, retained Ballet/Volleyball/Cheer career progress, practice actions and configured unlock requirements. These domain capabilities have not been verified against a fresh PostgreSQL test database in this implementation pass. The Nostrum adapter registers only uniquely named preview commands in one explicitly configured guild when both opt-in flags are enabled, and refuses to start unless `TORI_ECONOMY_WRITE_MODE=test` and the configured database matches the connected `*_test` database. Responses use ephemeral embeds and shop-page buttons; writes still pass through WriteGate. It is not a replacement for JDA command ownership. See [rewrite status](Tori/docs/ELIXIR-REWRITE-STATUS.md) for exact limitations and ownership.
+Progression includes a database-seeded level curve, idempotent/cooldown-controlled XP grants, retained Ballet/Volleyball/Cheer career progress, practice actions and configured unlock requirements. These domain capabilities have not been verified against a fresh PostgreSQL test database in this implementation pass. The Nostrum adapter registers only uniquely named preview commands in one explicitly configured guild when both opt-in flags are enabled, and refuses to start unless `TORI_ECONOMY_WRITE_MODE=test` and the configured database matches the connected `*_test` database. Responses use ephemeral embeds, category selection and shop-page buttons; commands are acknowledged before domain work to avoid Discord's interaction timeout. Writes still pass through WriteGate. It is not a replacement for JDA command ownership. See [rewrite status](Tori/docs/ELIXIR-REWRITE-STATUS.md) for exact limitations and ownership.
 
 ## Technology
 
@@ -83,7 +83,7 @@ Financial and item mutations use persistent idempotency keys, ledger/event recor
 
 ## Validation
 
-Run these checks on the Raspberry Pi before deployment or cutover. The current rewrite stack has **not been verified by this README update**.
+Run these checks on the Raspberry Pi before deployment or cutover. This implementation pass has **not been runtime-verified in this Windows environment**: Mix and Docker are unavailable, and the Gradle wrapper could not download its distribution because network access was denied.
 
 ```sh
 cd Tori

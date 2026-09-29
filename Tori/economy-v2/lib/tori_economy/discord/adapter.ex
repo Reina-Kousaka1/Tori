@@ -12,11 +12,33 @@ defmodule ToriEconomy.Discord.Adapter do
     "tori-consumable-preview" => :consumables,
     "tori-activity-preview" => :activities
   }
+  @shop_categories [
+    {"All styles", "all"}, {"Fashion", "fashion"}, {"Accessories", "accessories"},
+    {"Beauty", "beauty"}, {"Ballet", "ballet"}, {"Volleyball", "volleyball"},
+    {"Cheer", "cheer"}, {"Consumables", "consumables"},
+    {"Collectibles", "collectibles"}, {"Seasonal", "seasonal"}
+  ]
+  @shop_category_values Enum.map(@shop_categories, &elem(&1, 1))
+  @shop_category_set MapSet.new(@shop_category_values)
   @mutations ~w(shop.purchase inventory.equip inventory.unequip
     inventory.cosmetic.select inventory.cosmetic.clear marketplace.list marketplace.buy
     marketplace.cancel career.select career.practice inventory.consume activity.perform)
 
   def preview_commands, do: Map.keys(@commands)
+  def shop_categories, do: @shop_categories
+
+  def supported_interaction?(interaction) do
+    data = field(interaction, :data, %{})
+    name = field(data, :name, nil)
+    custom_id = field(data, :custom_id, nil)
+    name in Map.keys(@commands) or
+      (is_binary(custom_id) and String.starts_with?(custom_id, "tori-shop-"))
+  end
+
+  def component_interaction?(interaction) do
+    data = field(interaction, :data, %{})
+    is_binary(field(data, :custom_id, nil))
+  end
 
   def handle(%{data: %{name: name}, id: id, guild_id: guild, channel_id: channel} = interaction)
       when is_binary(name) and is_integer(id) and is_integer(guild) and is_integer(channel) do
@@ -43,10 +65,15 @@ defmodule ToriEconomy.Discord.Adapter do
   def shop_navigation(interaction) do
     data = field(interaction, :data, %{})
     case field(data, :custom_id, nil) do
+      "tori-shop-category" ->
+        case field(data, :values, []) do
+          [category] when category in @shop_category_values -> {:component, category, 0}
+          _ -> :ignore
+        end
       "tori-shop-page:" <> suffix ->
         case String.split(suffix, ":") do
           [category, page] ->
-            with true <- category == "all" or Regex.match?(~r/^[a-z0-9_-]{1,64}$/, category),
+            with true <- MapSet.member?(@shop_category_set, category),
                  {number, ""} <- Integer.parse(page), true <- number in 0..1000 do
               {:component, category, number}
             else
@@ -60,7 +87,7 @@ defmodule ToriEconomy.Discord.Adapter do
           if subcommand == "browse" do
             category = value(options, "category") || "all"
             page = integer(options, "page", 0)
-            if (category == "all" or Regex.match?(~r/^[a-z0-9_-]{1,64}$/, category)) and page in 0..1000 do
+            if MapSet.member?(@shop_category_set, category) and page in 0..1000 do
               {:command, category, page}
             else
               :ignore

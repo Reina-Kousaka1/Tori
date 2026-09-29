@@ -1,6 +1,7 @@
 defmodule ToriEconomy.Discord.PreviewCommands do
   @moduledoc "Registers only the uniquely named preview commands in one explicit test guild."
   use GenServer
+  alias ToriEconomy.Discord.Adapter
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -151,8 +152,7 @@ defmodule ToriEconomy.Discord.PreviewCommands do
     if max, do: Map.put(option, "max_value", max), else: option
   end
   defp choices(values), do: Enum.map(values, fn {name, value} -> %{"name" => name, "value" => value} end)
-  defp categories, do: choices(Enum.map(~w(fashion accessories beauty ballet volleyball cheer consumables collectibles seasonal),
-    &{String.capitalize(&1), &1}))
+  defp categories, do: choices(Adapter.shop_categories())
   defp fashion_slots, do: choices(Enum.map(~w(top bottom dress outerwear shoes bag accessory jewelry hair_accessory),
     &{String.replace(&1, "_", " "), &1}))
   defp cosmetic_slots, do: choices(Enum.map(~w(nails makeup hair_accessory),
