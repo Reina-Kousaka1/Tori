@@ -19,6 +19,9 @@ defmodule ToriEconomy.WriteGate do
   def validate_startup! do
     if System.get_env("TORI_ECONOMY_WRITE_ENABLED") == "true" do
       case write_mode() do
+        "disabled" ->
+          :ok
+
         mode when mode in ["", "test"] ->
           unless test_database?() do
             raise "Economy test writes require a PostgreSQL *_test database"
@@ -39,6 +42,7 @@ defmodule ToriEconomy.WriteGate do
 
   defp mode_allows?(operation) do
     case write_mode() do
+      "disabled" -> false
       "test" -> test_database?()
       "" -> test_database?()
       "production" ->
@@ -106,7 +110,8 @@ defmodule ToriEconomy.WriteGate do
   defp verify_connected_database do
     case write_mode() do
       "production" -> verify_production_database()
-      _ -> verify_test_database()
+      mode when mode in ["", "test"] -> verify_test_database()
+      _ -> {:error, "READ_ONLY"}
     end
   rescue
     _ -> {:error, "SERVICE_UNAVAILABLE"}

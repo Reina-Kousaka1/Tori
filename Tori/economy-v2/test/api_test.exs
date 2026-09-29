@@ -147,6 +147,58 @@ defmodule ToriEconomy.ApiTest do
     assert_raise RuntimeError, fn -> ToriEconomy.WriteGate.validate_startup!() end
   end
 
+  test "disabled mode starts but rejects every mutation regardless of the enabled flag" do
+    with_write_gate_env(fn ->
+      System.put_env("TORI_ECONOMY_WRITE_MODE", "disabled")
+      System.put_env("TORI_ECONOMY_DATABASE_URL", "postgresql://localhost/tori_test")
+
+      for enabled <- ["true", "false"] do
+        System.put_env("TORI_ECONOMY_WRITE_ENABLED", enabled)
+        assert :ok = ToriEconomy.WriteGate.validate_startup!()
+        assert {:error, "READ_ONLY"} = ToriEconomy.WriteGate.authorize("daily.claim")
+        assert {:error, "READ_ONLY"} = ToriEconomy.WriteGate.authorize("wallet.transfer")
+      end
+    end)
+  end
+
+  test "test mode requires a configured test database and unknown enabled modes fail startup" do
+    with_write_gate_env(fn ->
+      System.put_env("TORI_ECONOMY_WRITE_ENABLED", "true")
+      System.put_env("TORI_ECONOMY_WRITE_MODE", "test")
+      System.delete_env("TORI_ECONOMY_DATABASE_NAME")
+      System.put_env("TORI_ECONOMY_DATABASE_URL", "postgresql://localhost/tori")
+      assert_raise RuntimeError, fn -> ToriEconomy.WriteGate.validate_startup!() end
+      assert {:error, "READ_ONLY"} = ToriEconomy.WriteGate.authorize("daily.claim")
+
+      System.put_env("TORI_ECONOMY_DATABASE_URL", "postgresql://localhost/tori_test")
+      assert :ok = ToriEconomy.WriteGate.validate_startup!()
+
+      System.put_env("TORI_ECONOMY_WRITE_MODE", "unknown")
+      assert_raise RuntimeError, fn -> ToriEconomy.WriteGate.validate_startup!() end
+      assert {:error, "READ_ONLY"} = ToriEconomy.WriteGate.authorize("daily.claim")
+    end)
+  end
+
+  defp with_write_gate_env(callback) do
+    keys = [
+      "TORI_ECONOMY_WRITE_ENABLED",
+      "TORI_ECONOMY_WRITE_MODE",
+      "TORI_ECONOMY_DATABASE_URL",
+      "TORI_ECONOMY_DATABASE_NAME"
+    ]
+
+    previous = Map.new(keys, &{&1, System.get_env(&1)})
+
+    try do
+      callback.()
+    after
+      Enum.each(previous, fn
+        {key, nil} -> System.delete_env(key)
+        {key, value} -> System.put_env(key, value)
+      end)
+    end
+  end
+
   defp request(body) do
     conn(:post, "/internal/economy/v1/execute", body)
     |> put_req_header("authorization", "Bearer " <> String.duplicate("s", 32))
