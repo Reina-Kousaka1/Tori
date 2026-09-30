@@ -130,7 +130,9 @@ public final class Main implements AutoCloseable {
         var prefixes = new PrefixSettings(store);
         general = new GeneralBot(languages, new StatusRotation(), ownerId, this::requestRestart, startedAt)
             .withStats(store, config.get("BOT_CREATOR", "")).withPrefixes(prefixes)
-            .withPersona(new ToriPersona(ToriPersonaConfig.load(config))).withShutdown(this::requestShutdown);
+            .withPersona(new ToriPersona(ToriPersonaConfig.load(config)))
+            .withPresenceSync(new ToriPresenceSync(config.toriPresenceClient()))
+            .withShutdown(this::requestShutdown);
         if (store instanceof PostgresBotStore postgres) {
             general.withCurrency(new PostgresCurrencyStore(postgres.database()));
             EconomyRouting economyRouting = config.economyRouting();

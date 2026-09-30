@@ -10,6 +10,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 /** One bot-wide presence rotation. All presence attempts, including controls, share the same pacing. */
 public final class StatusRotation implements AutoCloseable {
@@ -38,6 +39,7 @@ public final class StatusRotation implements AutoCloseable {
     private long intervalMs = DEFAULT_INTERVAL_MS;
     private int nextIndex;
     private Consumer<String> update;
+    private Supplier<String> dynamicText;
     private boolean attempted;
     private long lastAttemptNanos;
 
@@ -95,10 +97,36 @@ public final class StatusRotation implements AutoCloseable {
         Objects.requireNonNull(update);
         cancelPending();
         this.texts = validated;
+        this.dynamicText = null;
         this.intervalMs = intervalMs;
         this.update = update;
         this.running = true;
         this.nextIndex = 0;
+        emitOrSchedule(revision);
+    }
+
+    /** Starts a rotation whose semantic status is resolved afresh on every tick. */
+    public synchronized void startDynamic(Supplier<String> text, long intervalMs, Consumer<String> update) {
+        ensureOpen();
+        if (intervalMs < MIN_INTERVAL_MS || intervalMs > MAX_INTERVAL_MS)
+            throw new UserError("status.interval", MIN_INTERVAL_MS, MAX_INTERVAL_MS);
+        Objects.requireNonNull(text);
+        Objects.requireNonNull(update);
+        cancelPending();
+        this.texts = List.of();
+        this.dynamicText = text;
+        this.intervalMs = intervalMs;
+        this.update = update;
+        this.running = true;
+        this.nextIndex = 0;
+        emitOrSchedule(revision);
+    }
+
+    /** Re-resolves the current dynamic status while retaining the shared update pacing. */
+    public synchronized void refresh() {
+        ensureOpen();
+        if (!running || dynamicText == null) return;
+        cancelPending();
         emitOrSchedule(revision);
     }
 
@@ -108,6 +136,7 @@ public final class StatusRotation implements AutoCloseable {
         cancelPending();
         running = false;
         texts = List.of();
+        dynamicText = null;
         intervalMs = DEFAULT_INTERVAL_MS;
         this.update = update;
         emitOrSchedule(revision);
@@ -134,15 +163,15 @@ public final class StatusRotation implements AutoCloseable {
         if (closed || revision != expectedRevision) return;
         long delay = remainingDelay(MIN_INTERVAL_MS);
         if (delay > 0) { schedule(expectedRevision, delay); return; }
-        String text = running ? texts.get(nextIndex) : null;
-        if (running) nextIndex = (nextIndex + 1) % texts.size();
+        String text = running ? (dynamicText == null ? texts.get(nextIndex) : dynamicText.get()) : null;
+        if (running && dynamicText == null) nextIndex = (nextIndex + 1) % texts.size();
         attempted = true;
         lastAttemptNanos = nanoTime.getAsLong();
         try { update.accept(text); }
         catch (RuntimeException ex) { LOG.warn("Bot status update failed ({})", ex.getClass().getSimpleName()); }
         // A consumer may reenter start/stop/close; do not restore its superseded schedule.
         if (closed || revision != expectedRevision) return;
-        if (running && texts.size() > 1) schedule(expectedRevision, remainingDelay(intervalMs));
+        if (running && (dynamicText != null || texts.size() > 1)) schedule(expectedRevision, remainingDelay(intervalMs));
         else if (!running) update = null;
     }
 
@@ -161,6 +190,7 @@ public final class StatusRotation implements AutoCloseable {
         closed = true;
         running = false;
         texts = List.of();
+        dynamicText = null;
         intervalMs = DEFAULT_INTERVAL_MS;
         update = null;
         cancelPending();

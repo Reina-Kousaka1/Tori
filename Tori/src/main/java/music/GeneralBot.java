@@ -52,10 +52,24 @@ public final class GeneralBot extends CommandListener {
     private EconomyRouting economyRouting = EconomyRouting.legacy();
     private PostgresMarketStore market;
     private ToriPersona persona = ToriPersona.defaults();
+    private ToriPresenceSync presenceSync = ToriPresenceSync.disabled();
+    private java.util.function.IntUnaryOperator presencePicker =
+        bound -> ThreadLocalRandom.current().nextInt(bound);
+    private String lastDefaultText;
+    private Activity lastDefaultActivity;
     private String creator;
     private PrefixSettings prefixes;
     GeneralBot withPrefixes(PrefixSettings prefixes) { this.prefixes = prefixes; return this; }
     GeneralBot withPersona(ToriPersona persona) { this.persona = Objects.requireNonNull(persona); return this; }
+    GeneralBot withPresenceSync(ToriPresenceSync sync) {
+        this.presenceSync.close();
+        this.presenceSync = Objects.requireNonNull(sync);
+        return this;
+    }
+    GeneralBot withPresencePicker(java.util.function.IntUnaryOperator picker) {
+        this.presencePicker = Objects.requireNonNull(picker);
+        return this;
+    }
     GeneralBot withCurrency(CurrencyStore currency) { this.currency = Objects.requireNonNull(currency); return this; }
     GeneralBot withEconomyV2Balance(EconomyV2Client client) { this.economyV2Balance = Objects.requireNonNull(client); return this; }
     GeneralBot withEconomyRouting(EconomyRouting routing) { this.economyRouting = Objects.requireNonNull(routing); return this; }
@@ -93,21 +107,26 @@ public final class GeneralBot extends CommandListener {
 
     void refreshDefaultStatus(JDA jda) {
         synchronized (rotation) {
-            if (!closed && !rotation.snapshot().running()) startDefaultStatus(jda);
+            if (closed) return;
+            presenceSync.start(ignored -> {
+                synchronized (rotation) {
+                    if (!closed && defaultRotation && rotation.snapshot().running()) rotation.refresh();
+                }
+            });
+            if (!rotation.snapshot().running()) startDefaultStatus(jda);
         }
     }
 
     private void startDefaultStatus(JDA jda) {
-        rotation.start(persona.statuses(), StatusRotation.DEFAULT_INTERVAL_MS, slot -> applyDefaultStatus(jda, slot));
         defaultRotation = true;
-    }
-
-    private void applyDefaultStatus(JDA jda, String slot) {
-        var manager = jda.getShardManager();
-        long servers = manager == null ? jda.getGuildCache().size() : manager.getGuildCache().size();
-        int shards = jda.getShardInfo().getShardTotal();
-        var activity = persona.statusActivity(slot, servers, shards);
-        applyPresence(jda, OnlineStatus.ONLINE, activity);
+        rotation.startDynamic(() -> {
+            int shards = jda.getShardInfo().getShardTotal();
+            lastDefaultActivity = ToriPresencePolicy.resolve(
+                presenceSync.current(), shards, presencePicker, lastDefaultText);
+            lastDefaultText = lastDefaultActivity.getName();
+            return lastDefaultText;
+        }, StatusRotation.DEFAULT_INTERVAL_MS,
+            ignored -> applyPresence(jda, OnlineStatus.ONLINE, lastDefaultActivity));
     }
 
     private static void applyPresence(JDA jda, OnlineStatus status, Activity activity) {
@@ -199,14 +218,23 @@ public final class GeneralBot extends CommandListener {
                 .addOption(OptionType.STRING, "item", "Tool item ID", true),
             Commands.slash("opencrate", "Open a gathered crate with a crate key")
                 .addOption(OptionType.STRING, "item", "Crate item ID", true),
-            Commands.slash("status", "Manage rotating bot status (bot owner only)")
+            Commands.slash("status", "Manage Tori's status (bot owner only)")
                 .addOptions(
-                    new OptionData(OptionType.STRING, "action", "Start, stop or show the rotation")
-                        .addChoice("Start", "start").addChoice("Stop", "stop").addChoice("Show", "show"),
+                    new OptionData(OptionType.STRING, "action", "Start, stop, show or set Tori's activity")
+                        .addChoice("Start", "start").addChoice("Stop", "stop").addChoice("Show", "show")
+                        .addChoice("Set activity", "activity"),
                     new OptionData(OptionType.STRING, "texts", "One status or multiple texts separated by | or line breaks")
                         .setMaxLength(2000),
                     new OptionData(OptionType.INTEGER, "interval_ms", "Rotation interval in milliseconds")
-                        .setRequiredRange(StatusRotation.MIN_INTERVAL_MS, StatusRotation.MAX_INTERVAL_MS))
+                        .setRequiredRange(StatusRotation.MIN_INTERVAL_MS, StatusRotation.MAX_INTERVAL_MS),
+                    new OptionData(OptionType.STRING, "activity", "Tori's global activity")
+                        .addChoice("General", "general").addChoice("School", "school")
+                        .addChoice("Ballet", "ballet").addChoice("Volleyball", "volleyball")
+                        .addChoice("Cheer", "cheer").addChoice("Resting", "resting"),
+                    new OptionData(OptionType.STRING, "special_event", "Optional global event")
+                        .setMaxLength(64),
+                    new OptionData(OptionType.INTEGER, "ttl_seconds", "Optional activity lifetime in seconds")
+                        .setRequiredRange(60, 604800))
         ));
     }
     @Override protected String handle(CommandContext event, Language language) {
@@ -676,10 +704,20 @@ public final class GeneralBot extends CommandListener {
         String action = actionOption == null ? "show" : actionOption.getAsString();
         var textsOption = event.getOption("texts");
         var intervalOption = event.getOption("interval_ms");
+        var activityOption = event.getOption("activity");
+        var eventOption = event.getOption("special_event");
+        var ttlOption = event.getOption("ttl_seconds");
         var jda = event.getJDA();
         synchronized (rotation) {
             require(!closed, "shutting.down");
             if (action.equals("show") || action.equals("stop")) {
+                require(textsOption == null && intervalOption == null && activityOption == null
+                    && eventOption == null && ttlOption == null, "status.options");
+            }
+            if (action.equals("start")) {
+                require(activityOption == null && eventOption == null && ttlOption == null, "status.options");
+            }
+            if (action.equals("activity")) {
                 require(textsOption == null && intervalOption == null, "status.options");
             }
             switch (action) {
@@ -703,9 +741,45 @@ public final class GeneralBot extends CommandListener {
                     return state.running() ? Messages.text(language, "status.running", state.texts().size(), state.intervalMs())
                         : Messages.text(language, "status.inactive");
                 }
+                case "activity" -> {
+                    if (activityOption == null) return Messages.text(language, "error.input");
+                    if (!presenceSync.available()) return presenceProviderUnavailable(language);
+                    String activity = activityOption.getAsString().toLowerCase(Locale.ROOT);
+                    String specialEvent = eventOption == null ? null : eventOption.getAsString().strip();
+                    if (specialEvent != null && !specialEvent.isEmpty()
+                        && !specialEvent.matches("[A-Za-z0-9_-]{1,64}"))
+                        return Messages.text(language, "error.input");
+                    Long ttlSeconds = ttlOption == null ? null : ttlOption.getAsLong();
+                    try {
+                        presenceSync.setContext(activity, specialEvent, ttlSeconds);
+                        return presenceContextUpdated(language, activity, specialEvent);
+                    } catch (Exception ex) {
+                        if (ex instanceof InterruptedException) Thread.currentThread().interrupt();
+                        org.slf4j.LoggerFactory.getLogger(GeneralBot.class)
+                            .warn("Tori presence context update failed ({})", ex.getClass().getSimpleName());
+                        return presenceProviderUnavailable(language);
+                    }
+                }
                 default -> throw new UserError("status.action");
             }
         }
+    }
+
+    private static String presenceProviderUnavailable(Language language) {
+        return switch (language) {
+            case DE -> "Toris Presence-Dienst ist nicht erreichbar. Der lokale Fallback bleibt aktiv.";
+            case NL -> "Tori's presence-service is niet bereikbaar. De lokale fallback blijft actief.";
+            case EN -> "Tori's presence service is unavailable. The local fallback remains active.";
+        };
+    }
+
+    private static String presenceContextUpdated(Language language, String activity, String event) {
+        String details = event == null || event.isBlank() ? activity : activity + " · " + event;
+        return switch (language) {
+            case DE -> "Toris globaler Activity-Kontext wurde aktualisiert: " + details + ".";
+            case NL -> "Tori's globale activiteitscontext is bijgewerkt: " + details + ".";
+            case EN -> "Tori's global activity context was updated: " + details + ".";
+        };
     }
     public static String help(Language language) {
         var embed = helpEmbed(language);
@@ -919,6 +993,7 @@ public final class GeneralBot extends CommandListener {
         synchronized (rotation) {
             if (closed) return;
             closed = true;
+            presenceSync.close();
             rotation.close();
         }
         super.close();

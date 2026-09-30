@@ -108,21 +108,21 @@ class GeneralBotTest {
             bot.refreshDefaultStatus(jda);
             assertEquals(OnlineStatus.ONLINE, fixture.lastStatus.get());
             assertEquals(Activity.ActivityType.PLAYING, fixture.lastActivity.get().getType());
-            assertEquals("with my Besties! | ballet + volleyball 🎀🏐 | 4 servers | 1 shards", fixture.lastActivity.get().getName());
+            assertEquals("Busy at school 🏐🎀 | (1)", fixture.lastActivity.get().getName());
             timer.advance(StatusRotation.DEFAULT_INTERVAL_MS - 1);
             assertEquals(OnlineStatus.ONLINE, fixture.lastStatus.get(), "Must not rotate before the interval");
             timer.advance(1);
             assertEquals(OnlineStatus.ONLINE, fixture.lastStatus.get());
             assertEquals(Activity.ActivityType.CUSTOM_STATUS, fixture.lastActivity.get().getType());
-            assertEquals("Ballet practice, then volleyball 🩰🏐 | (1)", fixture.lastActivity.get().getName());
+            assertEquals("Doing homework... unfortunately | (1)", fixture.lastActivity.get().getName());
             fixture.shardCount = 3;
             fixture.serverCount = 8;
             timer.advance(StatusRotation.DEFAULT_INTERVAL_MS);
             assertEquals(OnlineStatus.ONLINE, fixture.lastStatus.get());
-            assertEquals(Activity.ActivityType.WATCHING, fixture.lastActivity.get().getType());
-            assertEquals("my pliés and volleyball serves 🎀 | (3)", fixture.lastActivity.get().getName());
+            assertEquals(Activity.ActivityType.PLAYING, fixture.lastActivity.get().getType());
+            assertEquals("Busy at school 🏐🎀 | (3)", fixture.lastActivity.get().getName());
             timer.advance(StatusRotation.DEFAULT_INTERVAL_MS);
-            assertEquals("my serve is cute, my landing is cleaner 🏐🩰 | (3)", fixture.lastActivity.get().getName());
+            assertEquals("Doing homework... unfortunately | (3)", fixture.lastActivity.get().getName());
             assertEquals(Messages.text(Language.EN, "status.default"), bot.handle(fixture.event("status", OWNER), Language.EN));
             var beforeClose = fixture.presenceUpdates.get();
             bot.close();
@@ -305,6 +305,17 @@ class GeneralBotTest {
         }
     }
 
+    @Test void activityControlFallsBackCleanlyWhenElixirIsNotConfigured() throws Exception {
+        var fixture = new Fixture();
+        var timer = new StatusRotationTest.FakeScheduler();
+        try (var bot = bot(timer.rotation())) {
+            String response = bot.handle(fixture.event("status", OWNER,
+                Map.of("action", "activity", "activity", "ballet")), Language.EN);
+            assertTrue(response.contains("presence service is unavailable"));
+            assertEquals(0, fixture.presenceUpdates.get());
+        }
+    }
+
     @Test void closingGeneralBotStopsItsRotation() throws Exception {
         var rotation = new StatusRotation();
         try (var bot = bot(rotation)) {
@@ -344,7 +355,7 @@ class GeneralBotTest {
         rotation.start(List.of("Existing one", "Existing two"), 2 * StatusRotation.MIN_INTERVAL_MS, ignored -> {});
         try (var bot = new GeneralBot(new LanguageStore(directory.resolve("missing.properties"), Language.EN), rotation)) {
             var original = rotation.snapshot();
-            for (String action : List.of("start", "stop", "show")) {
+            for (String action : List.of("start", "stop", "show", "activity")) {
                 assertThrows(RuntimeException.class,
                     () -> bot.handle(fixture.event("status", OWNER, actionOptions(action)), Language.EN));
                 assertEquals(original, rotation.snapshot());
@@ -429,7 +440,7 @@ class GeneralBotTest {
         rotation.start(List.of("Existing one", "Existing two"), 2 * StatusRotation.MIN_INTERVAL_MS, ignored -> {});
         try (var bot = bot(rotation)) {
             var original = rotation.snapshot();
-            for (String action : List.of("start", "stop", "show")) {
+            for (String action : List.of("start", "stop", "show", "activity")) {
                 var error = assertThrows(UserError.class,
                     () -> bot.handle(fixture.event("status", caller, actionOptions(action)), Language.EN));
                 assertEquals("owner.only", error.getMessage());
@@ -458,13 +469,16 @@ class GeneralBotTest {
     }
 
     private GeneralBot bot(StatusRotation rotation) throws Exception {
-        return new GeneralBot(new LanguageStore(directory.resolve("languages.properties"), Language.EN), rotation, OWNER, null);
+        return new GeneralBot(new LanguageStore(directory.resolve("languages.properties"), Language.EN), rotation, OWNER, null)
+            .withPresencePicker(bound -> 0);
     }
 
     private static Map<String, ?> actionOptions(String action) {
-        return action.equals("start")
-            ? Map.of("action", action, "texts", "Replacement one | Replacement two", "interval_ms", StatusRotation.MIN_INTERVAL_MS + StatusRotation.MIN_INTERVAL_MS / 2)
-            : Map.of("action", action);
+        if (action.equals("start"))
+            return Map.of("action", action, "texts", "Replacement one | Replacement two",
+                "interval_ms", StatusRotation.MIN_INTERVAL_MS + StatusRotation.MIN_INTERVAL_MS / 2);
+        if (action.equals("activity")) return Map.of("action", action, "activity", "ballet");
+        return Map.of("action", action);
     }
 
     /** Public JDA interfaces are faked; options use JDA's real parser without a Discord connection. */

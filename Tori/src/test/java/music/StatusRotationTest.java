@@ -181,6 +181,24 @@ class StatusRotationTest {
         assertEquals(List.of("A", "B", "C", "D"), StatusRotation.parseTexts("A\r\nB\n\n|C\u2028D\r"));
     }
 
+    @Test void dynamicStatusIsRecomputedAfterContextChangesAndKeepsSharedPacing() {
+        var timer = new FakeScheduler();
+        try (var rotation = timer.rotation()) {
+            var context = new java.util.concurrent.atomic.AtomicReference<>("General");
+            var sent = new ArrayList<String>();
+            rotation.startDynamic(context::get, INTERVAL, sent::add);
+            assertEquals(List.of("General"), sent);
+            context.set("Ballet");
+            rotation.refresh();
+            timer.advance(GAP - 1);
+            assertEquals(List.of("General"), sent);
+            timer.advance(1);
+            assertEquals(List.of("General", "Ballet"), sent);
+            timer.advance(INTERVAL);
+            assertEquals(List.of("General", "Ballet", "Ballet"), sent);
+        }
+    }
+
     @Test void singleStatusStaysFixedWithoutRepeatedUpdatesAndCanBeReplaced() {
         var timer = new FakeScheduler();
         try (var rotation = timer.rotation()) {

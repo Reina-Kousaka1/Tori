@@ -103,6 +103,24 @@ class BotConfigTest {
             () -> BotConfig.load(directory).economyV2BalanceClient());
     }
 
+    @Test void presenceProviderIsOptionalAndIndependentFromEconomyRouting() throws Exception {
+        Files.writeString(directory.resolve(".env"), "TORI_ECONOMY_BALANCE_SOURCE=LEGACY\n");
+        assertNull(BotConfig.load(directory).toriPresenceClient());
+
+        Files.writeString(directory.resolve(".env"), """
+            TORI_ECONOMY_BALANCE_SOURCE=LEGACY
+            TORI_ECONOMY_URL=http://127.0.0.1:4001
+            TORI_ECONOMY_API_SECRET=local-test-secret-with-at-least-32-characters
+            """);
+        assertNotNull(BotConfig.load(directory).toriPresenceClient());
+
+        Files.writeString(directory.resolve(".env"), """
+            TORI_PRESENCE_URL=http://untrusted.example:4001
+            TORI_ECONOMY_API_SECRET=local-test-secret-with-at-least-32-characters
+            """);
+        assertNull(BotConfig.load(directory).toriPresenceClient());
+    }
+
     @Test void economyRoutingDefaultsToLegacyAndSupportsPerReadAreaOptIn() throws Exception {
         Files.writeString(directory.resolve(".env"), "");
         var legacy = BotConfig.load(directory).economyRouting();

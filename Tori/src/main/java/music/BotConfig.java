@@ -98,6 +98,31 @@ public final class BotConfig {
 
     EconomyV2Client economyV2BalanceClient() { return economyV2Client(economyRouting()); }
 
+    /**
+     * Presence context is optional and independent of economy routing. Missing or unsafe
+     * provider configuration leaves Java on its local General fallback.
+     */
+    ToriPresenceClient toriPresenceClient() {
+        String secret = get("TORI_ECONOMY_API_SECRET");
+        if (secret == null || secret.isBlank() || secret.length() < 32) return null;
+
+        URI url;
+        try {
+            url = URI.create(get("TORI_PRESENCE_URL",
+                get("TORI_ECONOMY_URL", "http://127.0.0.1:4001")));
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+        if (!"http".equals(url.getScheme()) || url.getUserInfo() != null || url.getQuery() != null ||
+                url.getFragment() != null || !"".equals(url.getPath()) && !"/".equals(url.getPath()) ||
+                url.getHost() == null ||
+                !java.util.Set.of("127.0.0.1", "localhost", "[::1]", "economy-api").contains(url.getHost()))
+            return null;
+
+        return new ToriPresenceClient(java.net.http.HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(2)).build(), url, secret);
+    }
+
     String redactSensitive(String text) {
         String safe = text;
         for (String key : List.of("DISCORD_TOKEN", "LAVALINK_PASSWORD", "TORI_DATABASE_PASSWORD",

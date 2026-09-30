@@ -73,9 +73,9 @@ Antworten sind im Kanal für alle sichtbar; Gründe enthalten die Moderator-ID i
 | `/language code:nl` | Niederländisch speichern |
 | `/help` | Befehlsübersicht mit kurzer Verwendung anzeigen |
 | `/ping` | WebSocket- und Bot-REST-Latenz in Millisekunden anzeigen |
-| `/status` | Einstellungen des rotierenden Bot-Status anzeigen (nur Bot-Inhaber) |
+| `/status` | Tori Presence V2 anzeigen und steuern (nur Bot-Inhaber) |
 | `/status action:start texts:Musik \| /help interval_ms:120000` | Statustexte alle 120000 ms wechseln |
-| `/status action:stop` | Eigene Rotation stoppen und Standardrotation wiederherstellen |
+| `/status action:stop` | Eigene Rotation stoppen und Tori Presence V2 wiederherstellen |
 
 `/ping` ist für alle Servermitglieder verfügbar. WebSocket zeigt die zuletzt gemessene
 Heartbeat-Latenz; Bot (REST) misst eine neue Anfrage an die Discord-API. Beide Werte sind in `ms`.
@@ -91,13 +91,25 @@ gesetzt: 30000 bis 3600000, standardmäßig 120000. Beispiel in Discord:
 /status action:start texts:🎵 Musik | /help für Befehle | Bereit zum Abspielen interval_ms:120000
 ```
 
-Ohne Optionen (oder mit `action:show`) zeigt `/status` die Anzahl der Texte und das aktuelle Intervall.
-`action:stop` beendet die eigene Rotation und stellt die beiden Standardstatus wieder her. `texts` und `interval_ms` sind nur
-bei `action:start` erlaubt. Es gibt eine gemeinsame Rotation für den gesamten Bot, unabhängig vom Server.
-Zwischen Statusänderungen liegen mindestens 30000 ms; auch schnelles Neustarten oder Stoppen
-umgeht diese Pause nicht. Die neueste Änderung wird innerhalb der nächsten 30000 ms angewendet,
-sofern der Bot mit Discord verbunden ist. Die Rotation gilt bis zum Stoppen oder Bot-Neustart;
-nach einem Neustart erneut mit `action:start` aktivieren.
+Ohne Optionen (oder mit `action:show`) zeigt `/status` die Anzahl der eigenen Texte und das aktuelle Intervall.
+`action:stop` beendet die eigene Rotation und stellt die globale Tori Presence V2 wieder her. `texts` und `interval_ms` sind nur
+bei `action:start` erlaubt. Es gibt eine gemeinsame Presence für den gesamten Bot, unabhängig vom Server.
+
+Der Java-Bot ist der einzige Discord-Presence-Writer. Java wählt Texte, Discord-Activity-Typ und den vorhandenen Shard-Kontext
+(zum Beispiel `| (3)`) lokal aus. Elixir liefert nur semantischen Kontext und setzt niemals Discord-Presence.
+Elixir hält Toris globale Activity flüchtig im überwachten OTP-Prozess; es werden dafür keine Tabellen oder Migrationen benötigt.
+Beispiel: `/status action:activity activity:ballet special_event:recital ttl_seconds:86400` setzt Toris globale Activity
+auf Ballet mit einem Event für 24 Stunden. `special_event` und `ttl_seconds` sind optional; ohne TTL bleibt der Context
+bis zur nächsten Änderung aktiv. Gültige Activities sind `general`, `school`, `ballet`, `volleyball`, `cheer` und `resting`.
+
+Mood- und Season-Varianten ergänzen die Templates der aktuellen Activity; sie wählen nicht zufällig eine andere Sportart.
+Bekannte Special Events haben Vorrang. Ein Status wechselt standardmäßig alle 120000 ms; Discord-Updates haben mindestens
+30000 ms Abstand. Elixir wird direkt beim Start und danach alle fünf Minuten synchronisiert. Java nutzt optional
+`TORI_PRESENCE_URL`, andernfalls `TORI_ECONOMY_URL` (im Compose-Netz `http://economy-api:4001`), sowie das private
+`TORI_ECONOMY_API_SECRET`. Fehlt eine gültige Provider-Konfiguration oder ist Elixir nicht erreichbar, bleibt Java
+mit dem letzten gültigen, nicht abgelaufenen Context aktiv und fällt danach sicher auf General/School zurück.
+Toris globale Activity ist unabhängig von den Careers einzelner Nutzer.
+
 Nur die mit `BOT_OWNER_ID` in `.env` konfigurierte Person darf `/status` ausführen.
 Serverinhaber und Administratoren erhalten dadurch keinen Zugriff. Die Antworten sind im Kanal sichtbar. Nach dem Update den Bot neu starten,
 damit die neuen Slash-Commands registriert werden.
