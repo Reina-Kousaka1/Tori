@@ -12,8 +12,8 @@ class OrderEmbedThemeTest {
     }
 
     @Test void statusColorAndMobileFieldLayoutRemainDistinct() {
-        assertEquals(ToriEmbeds.NAVY, TicketOrderBot.orderEmbed(order("NOTED"), 2).getColorRaw());
-        assertEquals(ToriEmbeds.WARM_GOLD, TicketOrderBot.orderEmbed(order("PROCESSING"), 2).getColorRaw());
+        assertEquals(ToriEmbeds.SOFT_LAVENDER, TicketOrderBot.orderEmbed(order("NOTED"), 2).getColorRaw());
+        assertEquals(ToriEmbeds.LAVENDER_ACCENT, TicketOrderBot.orderEmbed(order("PROCESSING"), 2).getColorRaw());
         assertEquals(ToriEmbeds.Category.SUCCESS.color(), TicketOrderBot.orderEmbed(order("DONE"), 0).getColorRaw());
         assertEquals(ToriEmbeds.Category.ERROR.color(), TicketOrderBot.orderEmbed(order("CANCELLED"), 0).getColorRaw());
         var embed = TicketOrderBot.orderEmbed(order("NOTED"), 2);

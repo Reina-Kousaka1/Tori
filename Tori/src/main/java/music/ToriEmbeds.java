@@ -2,28 +2,45 @@ package music;
 
 import net.dv8tion.jda.api.EmbedBuilder;
 
-/** Main Tori branding. Dev/varsity branding deliberately does not belong here. */
+/** Discord-only visual themes. Economy rules and Discord layouts stay separate. */
 public final class ToriEmbeds {
-    public static final int NAVY = 0x1D1D23;
-    public static final int SECONDARY_DARK = 0x2C303C;
-    public static final int GOLD = 0xD79A19;
-    public static final int WARM_GOLD = 0xE6AD2E;
-    public static final int CREAM = 0xF2EFE9;
+    public static final int SOFT_LAVENDER = 0xB9A7D4;
+    public static final int LAVENDER_ACCENT = 0x9883B8;
+    public static final int BALLET_PINK = 0xE6B4CB;
+    public static final int VOLLEYBALL_NAVY = 0x1D1D23;
+    public static final int VOLLEYBALL_GOLD = 0xD79A19;
+    public static final int CHEER_NAVY = 0x26344D;
+    public static final int CHEER_DUSTY_LAVENDER = 0xA39AB9;
 
     public enum Category {
-        DEFAULT(NAVY), SECONDARY(SECONDARY_DARK), HIGHLIGHT(WARM_GOLD),
-        INFO(GOLD), MUSIC(GOLD), STATS(NAVY),
+        GENERAL(SOFT_LAVENDER), ECONOMY(SOFT_LAVENDER), SHOP(SOFT_LAVENDER),
+        PROFILE(SOFT_LAVENDER), MARRIAGE(SOFT_LAVENDER),
+        ORDER_PROCESSING(LAVENDER_ACCENT),
+        BALLET(BALLET_PINK, BALLET_PINK, "Tori · Ballet"),
+        VOLLEYBALL(VOLLEYBALL_NAVY, VOLLEYBALL_GOLD, "Tori · Volleyball"),
+        CHEER(CHEER_NAVY, CHEER_DUSTY_LAVENDER, "Tori · Cheer"),
+        SYSTEM_INFO(SOFT_LAVENDER),
         SUCCESS(0x57A773), WARNING(0xE6AD2E), ERROR(0xD9534F);
 
         private final int color;
-        Category(int color) { this.color = color; }
+        private final int accentColor;
+        private final String header;
+        Category(int color) { this(color, color, "Tori"); }
+        Category(int color, int accentColor, String header) {
+            this.color = color;
+            this.accentColor = accentColor;
+            this.header = header;
+        }
         public int color() { return color; }
+        /** Optional secondary visual color for future banner/image renderers. */
+        public int accentColor() { return accentColor; }
+        public String header() { return header; }
     }
     private ToriEmbeds() {}
 
     /** Callers retain control of timestamps, images and command-specific content. */
     public static EmbedBuilder create(Category category, Language language) {
-        return new EmbedBuilder().setColor(category.color()).setAuthor("Tori")
+        return new EmbedBuilder().setColor(category.color()).setAuthor(category.header())
             .setFooter(footer(language, null));
     }
 

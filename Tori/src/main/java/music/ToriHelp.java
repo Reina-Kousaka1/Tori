@@ -68,7 +68,7 @@ final class ToriHelp {
     }
 
     static MessageEmbed overview(Language language) {
-        var embed = ToriEmbeds.create(ToriEmbeds.Category.INFO, language)
+        var embed = ToriEmbeds.create(ToriEmbeds.Category.GENERAL, language)
             .setTitle(Messages.text(language, "help.title"))
             .setDescription(Messages.text(language, "help.v2.intro"));
         var entries = entries();
@@ -88,7 +88,7 @@ final class ToriHelp {
                 .append(ToriEmbeds.shorten(Messages.text(language, "cmd." + name), 150));
         }
         if (body.isEmpty()) body.append(Messages.text(language, "help.v2.empty"));
-        return ToriEmbeds.text(ToriEmbeds.Category.INFO, language, label(language, section), body.toString()).build();
+        return ToriEmbeds.text(ToriEmbeds.Category.GENERAL, language, label(language, section), body.toString()).build();
     }
 
     static List<ActionRow> menu(String userId, Language language) {

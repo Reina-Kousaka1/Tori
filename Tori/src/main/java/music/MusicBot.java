@@ -81,7 +81,7 @@ public final class MusicBot extends CommandListener {
         var found = lyrics.find(query);
         String body = found.instrumental() ? Messages.text(language, "lyrics.instrumental") : found.lyrics();
         if (body.length() > 3700) body = body.substring(0, 3700) + "\n\n" + Messages.text(language, "lyrics.shortened");
-        return ToriEmbeds.create(ToriEmbeds.Category.MUSIC, language)
+        return ToriEmbeds.create(ToriEmbeds.Category.GENERAL, language)
             .setTitle(clip(found.artist() + " — " + found.title(), 256), found.url())
             .setDescription(body).setFooter(ToriEmbeds.footer(language, Messages.text(language, "lyrics.footer"))).build();
     }

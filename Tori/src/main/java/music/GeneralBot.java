@@ -837,7 +837,7 @@ public final class GeneralBot extends CommandListener {
             var manager = jda.getShardManager();
             var guilds = manager == null ? jda.getGuildCache().asList() : manager.getGuildCache().asList();
             long members = guilds.stream().mapToLong(guild -> Math.max(0, guild.getMemberCount())).sum();
-            var embed = ToriEmbeds.create(ToriEmbeds.Category.STATS, language)
+            var embed = ToriEmbeds.create(ToriEmbeds.Category.GENERAL, language)
                 .setTitle(Messages.text(language, "stats.title"))
                 .addField(Messages.text(language, "stats.uptime"), sessionUptime(startedAt, clock.instant()), false)
                 .addField(Messages.text(language, "stats.servers"), Long.toString(guilds.size()), true)
@@ -866,14 +866,13 @@ public final class GeneralBot extends CommandListener {
             return embed.build();
         }
         if (ECONOMY_COMMANDS.contains(event.getName()) && !event.getName().equals("shop")) {
-            var category = event.getName().equals("leaderboard") ? ToriEmbeds.Category.HIGHLIGHT
-                : ToriEmbeds.Category.DEFAULT;
-            return ToriEmbeds.text(category, language, "/" + event.getName(), economy(event, language)).build();
+            return ToriEmbeds.text(ToriEmbeds.Category.ECONOMY, language,
+                "/" + event.getName(), economy(event, language)).build();
         }
         if (Set.of("prefix", "language", "ping", "uptime", "status", "restart", "shutdown")
             .contains(event.getName())) {
             var category = Set.of("restart", "shutdown").contains(event.getName())
-                ? ToriEmbeds.Category.WARNING : ToriEmbeds.Category.DEFAULT;
+                ? ToriEmbeds.Category.WARNING : ToriEmbeds.Category.GENERAL;
             return ToriEmbeds.text(category, language, "/" + event.getName(), handle(event, language)).build();
         }
         if (!event.getName().equals("avatar")) return null;
@@ -897,7 +896,7 @@ public final class GeneralBot extends CommandListener {
     static MessageEmbed avatarEmbed(User user, Language language) {
         String url = user.getEffectiveAvatarUrl();
         url += (url.contains("?") ? "&" : "?") + "size=1024";
-        return ToriEmbeds.create(ToriEmbeds.Category.INFO, language)
+        return ToriEmbeds.create(ToriEmbeds.Category.PROFILE, language)
             .setTitle(Messages.text(language, "avatar.title", clip(user.getEffectiveName(), 100)))
             .setDescription(Messages.text(language, "avatar.link", url))
             .setImage(url).setFooter(ToriEmbeds.footer(language, "ID: " + user.getId())).build();

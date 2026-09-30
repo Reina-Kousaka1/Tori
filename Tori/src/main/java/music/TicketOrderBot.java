@@ -94,7 +94,7 @@ final class TicketOrderBot extends CommandListener {
                 result = actionErrorMessage(ex);
                 failed = true;
             }
-            var style = failed ? ToriEmbeds.Category.ERROR : ToriEmbeds.Category.INFO;
+            var style = failed ? ToriEmbeds.Category.ERROR : ToriEmbeds.Category.GENERAL;
             var title = "/" + event.getName() + (event.getSubcommandName() == null ? "" : " " + event.getSubcommandName());
             var embed = ToriEmbeds.text(style, languages.get(event.getGuild().getId()), title, result).build();
             hook.editOriginalEmbeds(embed).setAllowedMentions(List.of()).queue(null,
@@ -226,7 +226,7 @@ final class TicketOrderBot extends CommandListener {
             case "panel" -> {
                 requireAdmin(e.getMember()); TextChannel channel=e.getOption("channel").getAsChannel().asTextChannel();
                 var copy=TicketText.from(cfg);
-                channel.sendMessageEmbeds(ToriEmbeds.text(ToriEmbeds.Category.INFO, languages.get(guild),
+                channel.sendMessageEmbeds(ToriEmbeds.text(ToriEmbeds.Category.GENERAL, languages.get(guild),
                         copy.panelTitle(), copy.panelBody()).build())
                     .setComponents(ActionRow.of(Button.primary(OPEN_BUTTON,copy.buttonLabel())))
                     .setAllowedMentions(List.of()).complete();
@@ -299,7 +299,7 @@ final class TicketOrderBot extends CommandListener {
         try { ticket=store.createTicket(guildId,ticketId,creator,category,channel.getId()); }
         catch(Exception ex) { channel.delete().complete(); throw ex; }
         var copy=TicketText.from(cfg);
-        channel.sendMessageEmbeds(ToriEmbeds.text(ToriEmbeds.Category.INFO, languages.get(guildId),
+        channel.sendMessageEmbeds(ToriEmbeds.text(ToriEmbeds.Category.GENERAL, languages.get(guildId),
                 "Ticket #" + ticket.id(), copy.welcomeMessage(ticket.id(),category,creator)).build())
             .setComponents(ActionRow.of(Button.secondary("tori:ticket:claim",copy.claimLabel()),
                 Button.danger("tori:ticket:close",copy.closeLabel()),Button.danger("tori:ticket:delete",copy.deleteLabel())))
@@ -386,10 +386,10 @@ final class TicketOrderBot extends CommandListener {
         Button.secondary("tori:order:"+id+":NOTED","♡ noted").withDisabled(disabled),Button.primary("tori:order:"+id+":PROCESSING","💌 processing").withDisabled(disabled),Button.success("tori:order:"+id+":DONE","❕ done").withDisabled(disabled))); }
     static net.dv8tion.jda.api.entities.MessageEmbed orderEmbed(TicketOrderStore.Order o,int position) {
         var color = switch (o.status()) {
-            case "PROCESSING" -> ToriEmbeds.Category.HIGHLIGHT;
+            case "PROCESSING" -> ToriEmbeds.Category.ORDER_PROCESSING;
             case "DONE" -> ToriEmbeds.Category.SUCCESS;
             case "CANCELLED" -> ToriEmbeds.Category.ERROR;
-            default -> ToriEmbeds.Category.DEFAULT;
+            default -> ToriEmbeds.Category.GENERAL;
         };
         return ToriEmbeds.create(color, Language.EN).setTitle("📦 ORDER #"+o.id())
             .addField("Product",ToriEmbeds.shorten(o.product(), 100),false)

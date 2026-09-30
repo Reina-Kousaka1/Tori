@@ -25,7 +25,7 @@ final class ToriShopUi {
     }
 
     static MessageEmbed render(Language language, List<Entry> entries, Page page, String category, String note) {
-        var embed = ToriEmbeds.create(ToriEmbeds.Category.INFO, language)
+        var embed = ToriEmbeds.create(ToriEmbeds.Category.SHOP, language)
             .setTitle(Messages.text(language, "shop.current.title"))
             .setDescription(Messages.text(language, "shop.ui.category", category)
                 + "\n" + Messages.text(language, "shop.ui.page", page.index() + 1, page.count())
