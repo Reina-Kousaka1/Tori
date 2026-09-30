@@ -62,8 +62,14 @@ defmodule ToriEconomy.Discord.PreviewCommands do
         sub("use", "Consume one item and activate its configured effect.", [string("item_id", "Consumable item ID", true)])
       ]),
       command("tori-activity-preview", "Try an isolated test-gated gathering activity.", [
-        sub("perform", "Perform fish, mine or chop.", [string("activity", "Activity", true,
-          choices([{"Fishing", "fish"}, {"Mining", "mine"}, {"Chopping", "chop"}])])
+        sub("perform", "Perform fish, mine or chop.", [
+          string(
+            "activity",
+            "Activity",
+            true,
+            choices([{"Fishing", "fish"}, {"Mining", "mine"}, {"Chopping", "chop"}])
+          )
+        ])
       ])
     ]
   end
