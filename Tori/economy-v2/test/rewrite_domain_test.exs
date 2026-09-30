@@ -6,6 +6,7 @@ defmodule ToriEconomy.RewriteDomainTest do
     Api,
     Consumables,
     Contract,
+    Dispatcher,
     Equipment,
     Marketplace,
     Progression,
@@ -19,6 +20,12 @@ defmodule ToriEconomy.RewriteDomainTest do
   alias ToriEconomy.Shop.Rotation
 
   @url System.get_env("TORI_ECONOMY_TEST_DATABASE_URL")
+  @mutations ~w(
+    activity.perform career.practice career.select daily.claim inventory.consume
+    inventory.cosmetic.clear inventory.cosmetic.select inventory.equip inventory.unequip
+    marketplace.buy marketplace.cancel marketplace.list progression.grant shop.purchase
+    wallet.transfer
+  )
   @moduletag skip: if(is_nil(@url), do: "requires explicit isolated *_test database", else: false)
 
   setup_all do
@@ -48,7 +55,11 @@ defmodule ToriEconomy.RewriteDomainTest do
       "operation" => operation,
       "context" => context,
       "args" => args,
-      "idempotency_key" => "discord-interaction:" <> (interaction || snowflake())
+      "idempotency_key" =>
+        if(operation in @mutations,
+          do: "discord-interaction:" <> (interaction || snowflake()),
+          else: nil
+        )
     }
     |> then(fn raw ->
       {:ok, validated} = Contract.validate(raw)
@@ -235,6 +246,129 @@ defmodule ToriEconomy.RewriteDomainTest do
              Sql.query!("SELECT xp FROM economy_v2_account_progress WHERE user_id=$1", [user]).rows
   end
 
+  test "career overview exposes the three configured four-stage gameplay loops" do
+    user = snowflake()
+
+    assert {:ok, response} = Progression.execute(request("career.snapshot", user))
+    careers = Map.new(response["result"]["careers"], &{&1["code"], &1})
+
+    assert Enum.map(careers["ballet"]["actions"], & &1["action_code"]) ==
+             ~w(class barre rehearsal performance)
+
+    assert Enum.map(careers["volleyball"]["actions"], & &1["action_code"]) ==
+             ~w(court_practice drills scrimmage match)
+
+    assert Enum.map(careers["cheer"]["actions"], & &1["action_code"]) ==
+             ~w(squad_practice tumbling_stunts routine competition)
+
+    assert Enum.at(careers["ballet"]["actions"], 2)["required_career_level"] == 3
+    assert Enum.at(careers["ballet"]["actions"], 2)["required_item_id"] == "rehearsal_wrap_skirt"
+
+    assert Enum.at(careers["volleyball"]["actions"], 2)["required_item_id"] ==
+             "navy_warm_gold_court_jersey"
+
+    assert Enum.at(careers["cheer"]["actions"], 3)["required_item_id"] ==
+             "competition_day_ribbon_set"
+    refute Enum.at(careers["ballet"]["actions"], 0)["available"]
+
+    assert {:ok, _selected} =
+             Progression.execute(request("career.select", user, %{"career_code" => "ballet"}))
+
+    assert {:ok, selected_snapshot} = Progression.execute(request("career.snapshot", user))
+    assert length(selected_snapshot["result"]["active_career"]["actions"]) == 4
+  end
+
+  test "career actions atomically reward XP and Credits and require level plus equipped V11 gear" do
+    user = snowflake()
+
+    assert {:ok, _} =
+             Progression.execute(request("career.select", user, %{"career_code" => "ballet"}))
+
+    Sql.query!(
+      "INSERT INTO economy_v2_career_progress(user_id,career_code,xp) VALUES ($1,'ballet',100)",
+      [user]
+    )
+
+    Sql.query!(
+      "INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'rehearsal_wrap_skirt',1),($1,'soft_knit_legwarmers',1),($1,'warmup_shrug_wrap',1)",
+      [user]
+    )
+
+    rehearsal_args = %{"career_code" => "ballet", "action_code" => "rehearsal"}
+    blocked_by_level = request("career.practice", user, rehearsal_args)
+
+    assert {:ok, %{"error" => %{"code" => "REQUIREMENT_NOT_MET"}}} =
+             Progression.execute(blocked_by_level)
+
+    Sql.query!(
+      "UPDATE economy_v2_career_progress SET xp=400 WHERE user_id=$1 AND career_code='ballet'",
+      [user]
+    )
+
+    blocked_by_equipment = request("career.practice", user, rehearsal_args)
+
+    assert {:ok, %{"error" => %{"code" => "REQUIREMENT_NOT_MET"}}} =
+             Progression.execute(blocked_by_equipment)
+
+    Sql.query!(
+      """
+        INSERT INTO economy_v2_loadout(user_id,slot,item_id)
+        VALUES ($1,'bottom','rehearsal_wrap_skirt'),
+               ($1,'accessory','soft_knit_legwarmers'),
+               ($1,'outerwear','warmup_shrug_wrap')
+      """,
+      [user]
+    )
+
+    rehearsal = request("career.practice", user, rehearsal_args)
+    assert {:ok, earned} = Progression.execute(rehearsal)
+    assert earned["result"]["xp_awarded"] == "26"
+    assert earned["result"]["career_xp"] == "426"
+    assert earned["result"]["career_level"] == 3
+    assert earned["result"]["credits_awarded"] == "23"
+    assert earned["result"]["equipment_bonus_xp"] == 2
+    assert earned["result"]["equipment_bonus_credits"] == 5
+
+    assert {:ok, replay} =
+             Progression.execute(%{rehearsal | request_id: Ecto.UUID.generate()})
+
+    assert replay["result"] == earned["result"]
+
+    assert [[23]] =
+             Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [user]).rows
+
+    assert [[1]] =
+             Sql.query!(
+               "SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1 AND leg='career_reward'",
+               [rehearsal.idempotency_key]
+             ).rows
+
+    assert [[1]] =
+             Sql.query!(
+               "SELECT count(*) FROM economy_v2_xp_events WHERE request_key=$1",
+               [rehearsal.idempotency_key]
+             ).rows
+  end
+
+  test "career practice does not influence Tori's global mood even when it levels the account" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+    Sql.query!("INSERT INTO economy_v2_account_progress(user_id,xp) VALUES ($1,99)", [user])
+    Sql.query!(
+      "INSERT INTO economy_v2_career_selections(user_id,career_code) VALUES ($1,'ballet')",
+      [user]
+    )
+
+    before = ToriEconomy.Persona.Mood.snapshot()
+    action =
+      request("career.practice", user, %{"career_code" => "ballet", "action_code" => "class"})
+    assert {:ok, result} = Dispatcher.execute(action)
+    assert result["result"]["level_up"]
+    after_state = ToriEconomy.Persona.Mood.snapshot()
+    assert after_state.reason == before.reason
+    assert after_state.recent_events == before.recent_events
+  end
+
   test "career switching preserves old progression and profile reflects the new selection" do
     user = snowflake()
     Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
@@ -304,7 +438,7 @@ defmodule ToriEconomy.RewriteDomainTest do
     )
 
     Sql.query!(
-      "INSERT INTO economy_v2_career_progress(user_id,career_code,xp) VALUES ($1,'ballet',400)",
+      "INSERT INTO economy_v2_career_progress(user_id,career_code,xp) VALUES ($1,'ballet',100),($1,'volleyball',400)",
       [user]
     )
 
@@ -328,7 +462,11 @@ defmodule ToriEconomy.RewriteDomainTest do
     assert profile["balance"] == "321"
     assert profile["progression"]["xp"] == "1000"
     assert profile["progression"]["level"] == 4
+    assert profile["progression"]["skill_xp"] == "500"
+    assert profile["progression"]["skill_level"] == 3
     assert profile["progression"]["active_career"]["code"] == "ballet"
+    assert profile["progression"]["active_career"]["xp"] == "100"
+    assert profile["progression"]["active_career"]["level"] == 2
 
     assert [%{"slot" => "dress", "name" => "Soft Pink Slip Dress"}] =
              Enum.map(profile["loadout"], &Map.take(&1, ["slot", "name"]))

@@ -26,6 +26,40 @@ defmodule ToriEconomy.ContractTest do
     assert {:error, "INVALID_INPUT"} = Contract.validate(put_in(profile, ["args", "level"], 7))
   end
 
+  test "career practice accepts the configured gameplay stages and legacy alias" do
+    actions = [
+      {"ballet", "class"},
+      {"ballet", "barre"},
+      {"ballet", "rehearsal"},
+      {"ballet", "performance"},
+      {"volleyball", "court_practice"},
+      {"volleyball", "drills"},
+      {"volleyball", "scrimmage"},
+      {"volleyball", "match"},
+      {"cheer", "squad_practice"},
+      {"cheer", "tumbling_stunts"},
+      {"cheer", "routine"},
+      {"cheer", "competition"},
+      {"ballet", "practice"}
+    ]
+
+    for {career, action} <- actions do
+      request =
+        @base
+        |> Map.put("operation", "career.practice")
+        |> Map.put("args", %{"career_code" => career, "action_code" => action})
+
+      assert {:ok, %{operation: "career.practice"}} = Contract.validate(request)
+    end
+
+    invalid =
+      @base
+      |> Map.put("operation", "career.practice")
+      |> Map.put("args", %{"career_code" => "ballet", "action_code" => "marathon"})
+
+    assert {:error, "INVALID_INPUT"} = Contract.validate(invalid)
+  end
+
   test "market reads require a safe product ID and bounded history" do
     product = %{
       @base

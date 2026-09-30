@@ -354,6 +354,25 @@ defmodule ToriEconomy.Queries do
         [] -> 0
       end
 
+    # Skill level is derived, not separately stored: it represents career mastery
+    # accumulated across every active career and uses the shared XP thresholds.
+    [[skill_xp]] =
+      Sql.query!(
+        """
+          SELECT least(9223372036854775807::numeric, coalesce(sum(p.xp),0))::bigint
+          FROM economy_v2_career_progress p
+          JOIN economy_v2_careers c ON c.career_code=p.career_code AND c.active
+          WHERE p.user_id=$1
+        """,
+        [user_id]
+      ).rows
+
+    [[skill_level]] =
+      Sql.query!(
+        "SELECT coalesce(max(level),1) FROM economy_v2_xp_thresholds WHERE required_xp<=$1",
+        [skill_xp]
+      ).rows
+
     [[level, start_xp, next_xp]] =
       Sql.query!(
         """
@@ -398,6 +417,8 @@ defmodule ToriEconomy.Queries do
       "level" => level || 1,
       "level_start_xp" => Integer.to_string(start_xp || 0),
       "next_level_xp" => if(next_xp, do: Integer.to_string(next_xp)),
+      "skill_xp" => Integer.to_string(skill_xp),
+      "skill_level" => skill_level || 1,
       "active_career" => active_career
     }
   end

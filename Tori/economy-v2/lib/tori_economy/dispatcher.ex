@@ -139,34 +139,32 @@ defmodule ToriEconomy.Dispatcher do
 
   defp variables_for(_), do: %{}
 
+  @doc false
+  def mood_event_for_result(%{"type" => "career_practice"}), do: nil
+
+  def mood_event_for_result(domain) when is_map(domain) do
+    cond do
+      domain["rare_drop"] == true ->
+        :rare_drop
+
+      domain["level_up"] == true ->
+        :level_up
+
+      domain["type"] == "activity" ->
+        :successful_activity
+
+      domain["type"] in ["marketplace_purchase", "shop_purchase"] ->
+        :celebration
+
+      true ->
+        nil
+    end
+  end
+
+  def mood_event_for_result(_), do: nil
+
   defp record_mood_influence({:ok, %{"status" => "ok", "result" => domain}}) do
-    event =
-      cond do
-        domain["rare_drop"] == true ->
-          :rare_drop
-
-        domain["level_up"] == true ->
-          :level_up
-
-        domain["type"] == "career_practice" ->
-          case domain["career_code"] do
-            "ballet" -> :ballet_practice
-            "volleyball" -> :volleyball_match
-            "cheer" -> :cheer_event
-            _ -> nil
-          end
-
-        domain["type"] == "activity" ->
-          :successful_activity
-
-        domain["type"] in ["marketplace_purchase", "shop_purchase"] ->
-          :celebration
-
-        true ->
-          nil
-      end
-
-    if event do
+    if event = mood_event_for_result(domain) do
       try do
         ToriEconomy.Persona.Mood.record(event)
       catch

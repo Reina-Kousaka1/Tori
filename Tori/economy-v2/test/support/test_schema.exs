@@ -29,6 +29,7 @@ defmodule ToriEconomy.TestSchema do
                 end)
               else
                 apply_v11_content_drop_if_missing!(migrations)
+                apply_v12_career_gameplay_if_missing!(migrations)
               end
 
               verify_schema!(migrations)
@@ -180,6 +181,39 @@ defmodule ToriEconomy.TestSchema do
     end
   end
 
+  # Older isolated *_test databases may already have V1-V11. Apply only the
+  # additive V12 career-action configuration when that schema is missing it.
+  defp apply_v12_career_gameplay_if_missing!(migrations) do
+    if "economy_v2_career_actions" in public_tables() do
+      columns =
+        SQL.query!(
+          Repo,
+          "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='economy_v2_career_actions'",
+          []
+        ).rows
+        |> Enum.map(&hd/1)
+
+      gameplay_columns = ["reward_credits", "required_career_level", "required_item_id"]
+
+      cond do
+        Enum.all?(gameplay_columns, &(&1 in columns)) ->
+          :ok
+
+        Enum.any?(gameplay_columns, &(&1 in columns)) ->
+          raise "Incomplete V12 career gameplay migration in the isolated test schema"
+
+        true ->
+          case Enum.find(migrations, fn {version, _path} -> version == 12 end) do
+            {12, path} ->
+              SQL.query!(Repo, File.read!(path), [], query_type: :text)
+
+            nil ->
+              raise "Missing V12 career gameplay migration in the test schema"
+          end
+      end
+    end
+  end
+
   defp public_tables do
     SQL.query!(Repo, "SELECT tablename FROM pg_tables WHERE schemaname = 'public'", []).rows
     |> Enum.map(&hd/1)
@@ -261,6 +295,37 @@ defmodule ToriEconomy.TestSchema do
              &(&1 in public_tables())
            ) do
       raise "Incomplete Tori test schema: progression or cosmetic selection schema is missing"
+    end
+
+    career_action_columns =
+      SQL.query!(
+        Repo,
+        "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='economy_v2_career_actions'",
+        []
+      ).rows
+      |> Enum.map(&hd/1)
+
+    unless Enum.all?(
+             ["reward_credits", "required_career_level", "required_item_id"],
+             &(&1 in career_action_columns)
+           ) do
+      raise "Incomplete Tori test schema: V12 career gameplay columns are missing"
+    end
+
+    [[career_action_count]] =
+      SQL.query!(
+        Repo,
+        """
+          SELECT count(*) FROM economy_v2_career_actions
+          WHERE (career_code='ballet' AND action_code IN ('class','barre','rehearsal','performance'))
+             OR (career_code='volleyball' AND action_code IN ('court_practice','drills','scrimmage','match'))
+             OR (career_code='cheer' AND action_code IN ('squad_practice','tumbling_stunts','routine','competition'))
+        """,
+        []
+      ).rows
+
+    unless career_action_count == 12 do
+      raise "Incomplete Tori test schema: V12 career action seeds are missing"
     end
 
     unless SQL.query!(

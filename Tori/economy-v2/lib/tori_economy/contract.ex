@@ -130,7 +130,22 @@ defmodule ToriEconomy.Contract do
   defp validate_args("career.practice", args) do
     with :ok <- keys(args, ["career_code", "action_code"]),
          career when career in ["ballet", "volleyball", "cheer"] <- args["career_code"],
-         action when action in ["practice"] <- args["action_code"] do
+         action
+         when action in [
+                "practice",
+                "class",
+                "barre",
+                "rehearsal",
+                "performance",
+                "court_practice",
+                "drills",
+                "scrimmage",
+                "match",
+                "squad_practice",
+                "tumbling_stunts",
+                "routine",
+                "competition"
+              ] <- args["action_code"] do
       :ok
     else
       _ -> {:error, "INVALID_INPUT"}

@@ -2,6 +2,10 @@ defmodule ToriEconomy.Progression do
   @moduledoc "Database-configured XP thresholds, idempotent grants and career progression."
   alias ToriEconomy.{Idempotency, Sql}
 
+  @max_balance 9_223_372_036_854_775_807
+  @equipment_bonus_xp 2
+  @equipment_bonus_credits 5
+
   def execute(%{operation: operation} = request)
       when operation in ["progression.snapshot", "career.snapshot"] do
     user = request.context["target_user_id"] || request.context["actor_user_id"]
@@ -24,7 +28,7 @@ defmodule ToriEconomy.Progression do
         [user]
       ).rows
       |> Enum.map(fn [code, name, career_xp] ->
-        Map.merge(level_data(career_xp), %{
+        Map.merge(string_level_data(career_xp), %{
           "code" => code,
           "name" => name,
           "xp" => Integer.to_string(career_xp)
@@ -44,7 +48,7 @@ defmodule ToriEconomy.Progression do
              [user]
            ).rows do
         [[code, name, selected_at, career_xp]] ->
-          Map.merge(level_data(career_xp), %{
+          Map.merge(string_level_data(career_xp), %{
             "code" => code,
             "name" => name,
             "selected_at" => DateTime.to_iso8601(selected_at),
@@ -53,6 +57,23 @@ defmodule ToriEconomy.Progression do
 
         [] ->
           nil
+      end
+
+    {careers, selected} =
+      if operation == "career.snapshot" do
+        careers = attach_career_actions(careers, user, selected)
+
+        selected =
+          if selected do
+            case Enum.find(careers, &(&1["code"] == selected["code"])) do
+              nil -> selected
+              career -> Map.put(career, "selected_at", selected["selected_at"])
+            end
+          end
+
+        {careers, selected}
+      else
+        {careers, selected}
       end
 
     unlocks =
@@ -151,7 +172,9 @@ defmodule ToriEconomy.Progression do
     end
   end
 
-  defp grant_configured(request, user, source, reward, cooldown, career) do
+  defp grant_configured(request, user, source, reward, cooldown, career, bonus_xp \\ 0) do
+    reward = reward + bonus_xp
+
     [[elapsed]] =
       Sql.query!(
         """
@@ -302,9 +325,11 @@ defmodule ToriEconomy.Progression do
   defp practice_career(request) do
     user = request.context["actor_user_id"]
     career = request.args["career_code"]
-    action = request.args["action_code"]
+    action = normalize_action(career, request.args["action_code"])
     Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1) ON CONFLICT DO NOTHING", [user])
-    Sql.query!("SELECT user_id FROM economy_accounts WHERE user_id=$1 FOR UPDATE", [user])
+
+    [[balance]] =
+      Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1 FOR UPDATE", [user]).rows
 
     case Sql.query!(
            """
@@ -316,31 +341,92 @@ defmodule ToriEconomy.Progression do
       [[^career, career_name]] ->
         case Sql.query!(
                """
-                 SELECT a.source_code,x.reward_xp,x.cooldown_ms FROM economy_v2_career_actions a
+                 SELECT a.source_code,x.reward_xp,x.cooldown_ms,a.reward_credits,
+                        a.required_career_level,a.required_item_id
+                 FROM economy_v2_career_actions a
                  JOIN economy_v2_xp_sources x ON x.source_code=a.source_code
                  WHERE a.career_code=$1 AND a.action_code=$2 AND x.active
                """,
                [career, action]
              ).rows do
-          [[source, reward, cooldown]] ->
-            response = grant_configured(request, user, source, reward, cooldown, career)
+          [[source, reward_xp, cooldown, reward_credits, required_level, required_item_id]] ->
+            {_career_xp, career_level} = career_progress_data(user, career)
+            {bonus_xp, bonus_credits} = career_equipment_bonus(user, career)
+            total_credits = reward_credits + bonus_credits
 
-            case response do
-              %{"status" => "ok", "result" => result} ->
-                {:ok,
-                 %{
-                   "status" => "ok",
-                   "result" =>
-                     Map.merge(result, %{
-                       "type" => "career_practice",
-                       "career_code" => career,
-                       "career_name" => career_name,
-                       "presentation_key" => "career.practice.success"
-                     })
-                 }}
+            cond do
+              career_level < required_level ->
+                error("REQUIREMENT_NOT_MET")
 
-              other ->
-                other
+              not required_item_equipped?(user, required_item_id) ->
+                error("REQUIREMENT_NOT_MET")
+
+              balance > @max_balance - total_credits ->
+                error("REQUIREMENT_NOT_MET")
+
+              true ->
+                case grant_configured(
+                       request,
+                       user,
+                       source,
+                       reward_xp,
+                       cooldown,
+                       career,
+                       bonus_xp
+                     ) do
+                  %{"status" => "ok", "result" => result} ->
+                    next_balance = balance + total_credits
+
+                    Sql.query!(
+                      "UPDATE economy_accounts SET balance=$2,updated_at=now() WHERE user_id=$1",
+                      [user, next_balance]
+                    )
+
+                    Sql.query!(
+                      """
+                        INSERT INTO economy_v2_ledger_entries
+                          (user_id,request_key,leg,delta,balance_after,reason_code,guild_id)
+                        VALUES ($1,$2,'career_reward',$3,$4,'CAREER_ACTION',$5)
+                      """,
+                      [
+                        user,
+                        request.idempotency_key,
+                        total_credits,
+                        next_balance,
+                        request.context["guild_id"]
+                      ]
+                    )
+
+                    [[career_xp]] =
+                      Sql.query!(
+                        "SELECT xp FROM economy_v2_career_progress WHERE user_id=$1 AND career_code=$2",
+                        [user, career]
+                      ).rows
+
+                    career_level_after = level_data(career_xp).level
+
+                    %{
+                      "status" => "ok",
+                      "result" =>
+                        Map.merge(result, %{
+                          "type" => "career_practice",
+                          "career_code" => career,
+                          "career_name" => career_name,
+                          "action_code" => action,
+                          "career_xp" => Integer.to_string(career_xp),
+                          "career_level" => career_level_after,
+                          "credits_awarded" => Integer.to_string(total_credits),
+                          "balance" => Integer.to_string(next_balance),
+                          "equipment_bonus_xp" => bonus_xp,
+                          "equipment_bonus_credits" => bonus_credits,
+                          "required_item_id" => required_item_id,
+                          "presentation_key" => "career.practice.success"
+                        })
+                    }
+
+                  other ->
+                    other
+                end
             end
 
           [] ->
@@ -350,6 +436,164 @@ defmodule ToriEconomy.Progression do
       _ ->
         error("REQUIREMENT_NOT_MET")
     end
+  end
+
+  defp normalize_action("ballet", "practice"), do: "class"
+  defp normalize_action("volleyball", "practice"), do: "court_practice"
+  defp normalize_action("cheer", "practice"), do: "squad_practice"
+  defp normalize_action(_career, action), do: action
+
+  defp career_progress_data(user, career) do
+    case Sql.query!(
+           """
+             SELECT coalesce(p.xp,0),coalesce(max(t.level),1)
+             FROM economy_v2_careers c
+             LEFT JOIN economy_v2_career_progress p
+               ON p.user_id=$1 AND p.career_code=c.career_code
+             LEFT JOIN economy_v2_xp_thresholds t ON t.required_xp<=coalesce(p.xp,0)
+             WHERE c.career_code=$2
+             GROUP BY p.xp
+           """,
+           [user, career]
+         ).rows do
+      [[xp, level]] -> {xp, level}
+      [] -> {0, 1}
+    end
+  end
+
+  defp required_item_equipped?(_user, nil), do: true
+
+  defp required_item_equipped?(user, item_id) do
+    case Sql.query!(
+           """
+             SELECT l.item_id
+             FROM economy_v2_loadout l
+             JOIN economy_inventory i ON i.user_id=l.user_id AND i.item_id=l.item_id
+             JOIN economy_v2_catalog_items c ON c.item_id=l.item_id
+             WHERE l.user_id=$1 AND l.item_id=$2 AND l.slot=ANY(c.equip_slots)
+               AND i.quantity>0 AND c.active
+             FOR UPDATE OF l
+           """,
+           [user, item_id]
+         ).rows do
+      [[_item_id]] -> true
+      [] -> false
+    end
+  end
+
+  # A single career-matching V11 outfit grants a flat, non-stacking bonus.
+  defp career_equipment_bonus(user, career) do
+    equipped =
+      Sql.query!(
+        """
+          SELECT l.item_id
+          FROM economy_v2_loadout l
+          JOIN economy_inventory i ON i.user_id=l.user_id AND i.item_id=l.item_id
+          JOIN economy_v2_catalog_items c ON c.item_id=l.item_id
+          WHERE l.user_id=$1 AND c.category=$2 AND 'content_drop_v1'=ANY(c.tags)
+            AND l.slot=ANY(c.equip_slots) AND i.quantity>0 AND c.active
+          ORDER BY l.slot
+          LIMIT 1
+          FOR UPDATE OF l
+        """,
+        [user, career]
+      ).rows != []
+
+    if equipped,
+      do: {@equipment_bonus_xp, @equipment_bonus_credits},
+      else: {0, 0}
+  end
+
+  defp attach_career_actions(careers, user, selected) do
+    selected_code = if selected, do: selected["code"]
+
+    actions_by_career =
+      Sql.query!(
+        """
+          SELECT a.career_code,a.action_code,a.display_name,x.reward_xp,x.cooldown_ms,
+                 a.reward_credits,a.required_career_level,a.required_item_id,
+                 item.name,coalesce(item.equip_slots,ARRAY[]::text[]),
+                 coalesce((
+                   SELECT greatest(
+                     0,
+                     a.cooldown_ms -
+                       floor(extract(epoch FROM (now()-max(xp_event.occurred_at)))*1000)::bigint
+                   )
+                   FROM economy_v2_xp_events xp_event
+                   WHERE xp_event.user_id=$1 AND xp_event.source_code=a.source_code
+                 ),0),
+                 CASE WHEN a.required_item_id IS NULL THEN true ELSE EXISTS(
+                   SELECT 1
+                   FROM economy_v2_loadout l
+                   JOIN economy_inventory i ON i.user_id=l.user_id AND i.item_id=l.item_id
+                   JOIN economy_v2_catalog_items required ON required.item_id=l.item_id
+                   WHERE l.user_id=$1 AND l.item_id=a.required_item_id
+                     AND l.slot=ANY(required.equip_slots) AND i.quantity>0 AND required.active
+                 ) END
+          FROM economy_v2_career_actions a
+          JOIN economy_v2_xp_sources x ON x.source_code=a.source_code AND x.active
+          LEFT JOIN economy_v2_catalog_items item ON item.item_id=a.required_item_id
+          ORDER BY a.career_code,a.required_career_level,a.action_code
+        """,
+        [user]
+      ).rows
+      |> Enum.group_by(fn [career_code | _] -> career_code end)
+
+    Enum.map(careers, fn career ->
+      actions =
+        Map.get(actions_by_career, career["code"], [])
+        |> Enum.map(fn [
+                         _career_code,
+                         action_code,
+                         display_name,
+                         reward_xp,
+                         cooldown_ms,
+                         reward_credits,
+                         required_level,
+                         required_item_id,
+                         item_name,
+                         item_slots,
+                         cooldown_remaining,
+                         item_equipped
+                       ] ->
+          availability =
+            cond do
+              career["code"] != selected_code -> "select_career"
+              career["level"] < required_level -> "career_level"
+              not item_equipped -> "equipment"
+              cooldown_remaining > 0 -> "cooldown"
+              true -> "ready"
+            end
+
+          %{
+            "action_code" => action_code,
+            "display_name" => display_name,
+            "reward_xp" => Integer.to_string(reward_xp),
+            "reward_credits" => Integer.to_string(reward_credits),
+            "cooldown_ms" => cooldown_ms,
+            "cooldown_remaining_ms" => cooldown_remaining,
+            "required_career_level" => required_level,
+            "required_item_id" => required_item_id,
+            "required_item_name" => item_name,
+            "required_item_slots" => item_slots || [],
+            "required_item_equipped" => item_equipped,
+            "availability" => availability,
+            "available" => availability == "ready"
+          }
+        end)
+
+      Map.put(career, "actions", actions)
+    end)
+  end
+
+  defp string_level_data(xp) do
+    level = level_data(xp)
+
+    %{
+      "level" => level.level,
+      "level_start_xp" => level.level_start_xp,
+      "next_level_xp" => level.next_level_xp
+    }
   end
 
   defp career_result(code, type) do
