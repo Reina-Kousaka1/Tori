@@ -40,6 +40,7 @@ defmodule ToriEconomy.Activity.Policy do
     end
   end
 
-  def credits(tier, roll) when tier in 1..8 and is_integer(roll) and roll >= 0 and roll < 16 * tier,
-    do: 10 * tier + roll
+  def credits(tier, roll)
+      when tier in 1..8 and is_integer(roll) and roll >= 0 and roll < 16 * tier,
+      do: 10 * tier + roll
 end

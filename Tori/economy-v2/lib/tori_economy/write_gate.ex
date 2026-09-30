@@ -5,11 +5,23 @@ defmodule ToriEconomy.WriteGate do
 
   @production_ack "I_VERIFIED_BACKUP_RESTORE_SCHEMA_AND_EXCLUSIVE_WRITER_OWNERSHIP"
   @production_mutations ["daily.claim", "wallet.transfer"]
-  @mutations @production_mutations ++ ["shop.rotate", "shop.purchase", "inventory.equip",
-                                     "inventory.unequip", "progression.grant", "marketplace.list",
-                                     "marketplace.buy", "marketplace.cancel", "activity.perform",
-                                     "inventory.consume", "inventory.cosmetic.select",
-                                     "inventory.cosmetic.clear", "career.select", "career.practice"]
+  @mutations @production_mutations ++
+               [
+                 "shop.rotate",
+                 "shop.purchase",
+                 "inventory.equip",
+                 "inventory.unequip",
+                 "progression.grant",
+                 "marketplace.list",
+                 "marketplace.buy",
+                 "marketplace.cancel",
+                 "activity.perform",
+                 "inventory.consume",
+                 "inventory.cosmetic.select",
+                 "inventory.cosmetic.clear",
+                 "career.select",
+                 "career.practice"
+               ]
 
   def authorize(operation) when operation in @mutations do
     if System.get_env("TORI_ECONOMY_WRITE_ENABLED") == "true" and mode_allows?(operation) do
@@ -47,14 +59,21 @@ defmodule ToriEconomy.WriteGate do
 
   defp mode_allows?(operation) do
     case write_mode() do
-      "disabled" -> false
-      "test" -> test_database?()
-      "" -> test_database?()
+      "disabled" ->
+        false
+
+      "test" ->
+        test_database?()
+
+      "" ->
+        test_database?()
+
       "production" ->
         production_cutover_valid?() and operation in @production_mutations and
           operation in production_operations()
 
-      _ -> false
+      _ ->
+        false
     end
   end
 
@@ -63,7 +82,8 @@ defmodule ToriEconomy.WriteGate do
   defp test_database? do
     database_name = configured_database_name()
 
-    configured_postgres?() and is_binary(database_name) and String.ends_with?(database_name, "_test")
+    configured_postgres?() and is_binary(database_name) and
+      String.ends_with?(database_name, "_test")
   end
 
   defp production_cutover_valid? do
@@ -96,7 +116,8 @@ defmodule ToriEconomy.WriteGate do
           when scheme in ["postgres", "postgresql"] and is_binary(host) and is_binary(path) ->
             URI.decode(String.trim_leading(path, "/")) == configured_database_name()
 
-          _ -> false
+          _ ->
+            false
         end
     end
   end
@@ -109,7 +130,8 @@ defmodule ToriEconomy.WriteGate do
           _ -> nil
         end
 
-      name -> name
+      name ->
+        name
     end
   end
 
@@ -126,12 +148,19 @@ defmodule ToriEconomy.WriteGate do
   end
 
   defp verify_test_database do
-    case SQL.query(Repo, "SELECT current_database(), to_regclass('public.economy_v2_requests') IS NOT NULL, to_regclass('public.economy_v2_ledger_entries') IS NOT NULL", []) do
+    case SQL.query(
+           Repo,
+           "SELECT current_database(), to_regclass('public.economy_v2_requests') IS NOT NULL, to_regclass('public.economy_v2_ledger_entries') IS NOT NULL",
+           []
+         ) do
       {:ok, %{rows: [[database_name, true, true]]}} when is_binary(database_name) ->
         if String.ends_with?(database_name, "_test"), do: :ok, else: {:error, "READ_ONLY"}
 
-      {:ok, _} -> {:error, "READ_ONLY"}
-      {:error, _} -> {:error, "SERVICE_UNAVAILABLE"}
+      {:ok, _} ->
+        {:error, "READ_ONLY"}
+
+      {:error, _} ->
+        {:error, "SERVICE_UNAVAILABLE"}
     end
   end
 

@@ -3,7 +3,11 @@ defmodule ToriEconomy.LedgerIntegrationTest do
   alias ToriEconomy.{Accounts, Api, Market, Queries, Repo, Sql, TestSchema}
 
   @url System.get_env("TORI_ECONOMY_TEST_DATABASE_URL")
-  @moduletag skip: if(is_nil(@url), do: "set TORI_ECONOMY_TEST_DATABASE_URL to an isolated *_test database", else: false)
+  @moduletag skip:
+               if(is_nil(@url),
+                 do: "set TORI_ECONOMY_TEST_DATABASE_URL to an isolated *_test database",
+                 else: false
+               )
 
   setup_all do
     %{repo_pid: TestSchema.ensure_target!(@url)}
@@ -55,12 +59,17 @@ defmodule ToriEconomy.LedgerIntegrationTest do
   test "the application Repo uses the configured isolated test database" do
     assert TestSchema.config_mismatch(Repo.config(), @url) == nil
 
-    expected_database = @url |> URI.parse() |> Map.fetch!(:path) |> String.trim_leading("/") |> URI.decode()
+    expected_database =
+      @url |> URI.parse() |> Map.fetch!(:path) |> String.trim_leading("/") |> URI.decode()
+
     assert [[^expected_database]] = Sql.query!("SELECT current_database()", []).rows
   end
 
   test "the Repo guard detects a different configured database" do
-    assert TestSchema.config_mismatch(Keyword.put(Repo.config(), :database, "other_database"), @url) ==
+    assert TestSchema.config_mismatch(
+             Keyword.put(Repo.config(), :database, "other_database"),
+             @url
+           ) ==
              :database
   end
 
@@ -100,10 +109,21 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     System.put_env("TORI_ECONOMY_DATABASE_URL", @url)
 
     on_exit(fn ->
-      if previous_secret, do: System.put_env("TORI_ECONOMY_API_SECRET", previous_secret), else: System.delete_env("TORI_ECONOMY_API_SECRET")
-      if previous_writes, do: System.put_env("TORI_ECONOMY_WRITE_ENABLED", previous_writes), else: System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
-      if previous_mode, do: System.put_env("TORI_ECONOMY_WRITE_MODE", previous_mode), else: System.delete_env("TORI_ECONOMY_WRITE_MODE")
-      if previous_url, do: System.put_env("TORI_ECONOMY_DATABASE_URL", previous_url), else: System.delete_env("TORI_ECONOMY_DATABASE_URL")
+      if previous_secret,
+        do: System.put_env("TORI_ECONOMY_API_SECRET", previous_secret),
+        else: System.delete_env("TORI_ECONOMY_API_SECRET")
+
+      if previous_writes,
+        do: System.put_env("TORI_ECONOMY_WRITE_ENABLED", previous_writes),
+        else: System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
+
+      if previous_mode,
+        do: System.put_env("TORI_ECONOMY_WRITE_MODE", previous_mode),
+        else: System.delete_env("TORI_ECONOMY_WRITE_MODE")
+
+      if previous_url,
+        do: System.put_env("TORI_ECONOMY_DATABASE_URL", previous_url),
+        else: System.delete_env("TORI_ECONOMY_DATABASE_URL")
     end)
 
     actor = user_id()
@@ -111,8 +131,14 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     locked = api_call(api_payload(original))
     assert locked.status == 403
     assert Jason.decode!(locked.resp_body)["error"]["code"] == "READ_ONLY"
-    assert [[0]] = Sql.query!("SELECT count(*) FROM economy_accounts WHERE user_id=$1", [actor]).rows
-    assert [[0]] = Sql.query!("SELECT count(*) FROM economy_v2_requests WHERE idempotency_key=$1", [original.idempotency_key]).rows
+
+    assert [[0]] =
+             Sql.query!("SELECT count(*) FROM economy_accounts WHERE user_id=$1", [actor]).rows
+
+    assert [[0]] =
+             Sql.query!("SELECT count(*) FROM economy_v2_requests WHERE idempotency_key=$1", [
+               original.idempotency_key
+             ]).rows
 
     System.put_env("TORI_ECONOMY_WRITE_ENABLED", "true")
     first = api_call(api_payload(original))
@@ -126,11 +152,19 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     assert second.status == 200
     assert second_body["result"] == first_body["result"]
     assert second_body["request_id"] == retry.request_id
-    assert [[150]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [actor]).rows
-    assert [[1]] = Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [original.idempotency_key]).rows
+
+    assert [[150]] =
+             Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [actor]).rows
+
+    assert [[1]] =
+             Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [
+               original.idempotency_key
+             ]).rows
   end
 
-  test "persisted daily interaction replays after the Repo process restarts", %{repo_pid: old_repo} do
+  test "persisted daily interaction replays after the Repo process restarts", %{
+    repo_pid: old_repo
+  } do
     actor = user_id()
     original = request("daily.claim", actor, user_id())
     assert {:ok, first} = Accounts.execute(original)
@@ -141,8 +175,14 @@ defmodule ToriEconomy.LedgerIntegrationTest do
 
     assert {:ok, replay} = Accounts.execute(%{original | request_id: request_id()})
     assert replay["result"] == first["result"]
-    assert [[150]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [actor]).rows
-    assert [[1]] = Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [original.idempotency_key]).rows
+
+    assert [[150]] =
+             Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [actor]).rows
+
+    assert [[1]] =
+             Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [
+               original.idempotency_key
+             ]).rows
   end
 
   test "same key with different payload conflicts without another mutation" do
@@ -198,6 +238,7 @@ defmodule ToriEconomy.LedgerIntegrationTest do
       ).rows
 
     assert after_attempt == before
+
     assert [[0]] =
              Sql.query!(
                "SELECT count(*) FROM economy_v2_requests WHERE idempotency_key=$1",
@@ -213,6 +254,7 @@ defmodule ToriEconomy.LedgerIntegrationTest do
 
   test "claim after an existing legacy 24-hour cooldown awards exactly 150" do
     actor = user_id()
+
     last_claim =
       System.system_time(:millisecond) - ToriEconomy.DailyCooldown.duration_ms() - 1_000
 
@@ -249,9 +291,14 @@ defmodule ToriEconomy.LedgerIntegrationTest do
 
     assert Enum.all?(results, &(&1["status"] == "ok"))
     assert Enum.uniq(Enum.map(results, & &1["result"])) == [hd(results)["result"]]
-    assert [[150]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [actor]).rows
+
+    assert [[150]] =
+             Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [actor]).rows
+
     assert [[1]] =
-             Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [original.idempotency_key]).rows
+             Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [
+               original.idempotency_key
+             ]).rows
   end
 
   test "opposing transfers finish without a lock-order deadlock" do
@@ -261,8 +308,14 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     assert {:ok, _} = Accounts.execute(request("daily.claim", second, user_id()))
 
     requests = [
-      request("wallet.transfer", first, user_id(), %{"recipient_user_id" => second, "amount" => "50"}),
-      request("wallet.transfer", second, user_id(), %{"recipient_user_id" => first, "amount" => "50"})
+      request("wallet.transfer", first, user_id(), %{
+        "recipient_user_id" => second,
+        "amount" => "50"
+      }),
+      request("wallet.transfer", second, user_id(), %{
+        "recipient_user_id" => first,
+        "amount" => "50"
+      })
     ]
 
     results =
@@ -271,11 +324,18 @@ defmodule ToriEconomy.LedgerIntegrationTest do
       |> Enum.map(fn {:ok, {:ok, result}} -> result end)
 
     assert Enum.all?(results, &(&1["status"] == "ok"))
-    assert [[150]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [first]).rows
-    assert [[150]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [second]).rows
+
+    assert [[150]] =
+             Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [first]).rows
+
+    assert [[150]] =
+             Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [second]).rows
+
     for item <- requests do
       assert [[2]] =
-               Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [item.idempotency_key]).rows
+               Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [
+                 item.idempotency_key
+               ]).rows
     end
   end
 
@@ -331,63 +391,136 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     recipient = user_id()
     daily_request = request("daily.claim", sender, user_id())
     assert {:ok, _} = Accounts.execute(daily_request)
-    original = request("wallet.transfer", sender, user_id(), %{"recipient_user_id" => recipient, "amount" => "25"})
+
+    original =
+      request("wallet.transfer", sender, user_id(), %{
+        "recipient_user_id" => recipient,
+        "amount" => "25"
+      })
 
     results =
       1..8
       |> Task.async_stream(fn _ -> Accounts.execute(%{original | request_id: request_id()}) end,
-        max_concurrency: 8, timeout: 15_000)
+        max_concurrency: 8,
+        timeout: 15_000
+      )
       |> Enum.map(fn {:ok, {:ok, result}} -> result end)
 
     assert Enum.all?(results, &(&1["status"] == "ok"))
     assert Enum.uniq(Enum.map(results, & &1["result"])) == [hd(results)["result"]]
-    assert [[125]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [sender]).rows
-    assert [[25]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [recipient]).rows
-    assert [[2]] = Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [original.idempotency_key]).rows
-    assert [["DAILY_CLAIM"]] = Sql.query!("SELECT reason_code FROM economy_v2_ledger_entries WHERE user_id=$1 AND request_key=$2", [sender, daily_request.idempotency_key]).rows
-    assert [["TRANSFER_OUT"]] = Sql.query!("SELECT reason_code FROM economy_v2_ledger_entries WHERE user_id=$1 AND request_key=$2", [sender, original.idempotency_key]).rows
-    assert [["TRANSFER_IN"]] = Sql.query!("SELECT reason_code FROM economy_v2_ledger_entries WHERE user_id=$1 AND request_key=$2", [recipient, original.idempotency_key]).rows
+
+    assert [[125]] =
+             Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [sender]).rows
+
+    assert [[25]] =
+             Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [recipient]).rows
+
+    assert [[2]] =
+             Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [
+               original.idempotency_key
+             ]).rows
+
+    assert [["DAILY_CLAIM"]] =
+             Sql.query!(
+               "SELECT reason_code FROM economy_v2_ledger_entries WHERE user_id=$1 AND request_key=$2",
+               [sender, daily_request.idempotency_key]
+             ).rows
+
+    assert [["TRANSFER_OUT"]] =
+             Sql.query!(
+               "SELECT reason_code FROM economy_v2_ledger_entries WHERE user_id=$1 AND request_key=$2",
+               [sender, original.idempotency_key]
+             ).rows
+
+    assert [["TRANSFER_IN"]] =
+             Sql.query!(
+               "SELECT reason_code FROM economy_v2_ledger_entries WHERE user_id=$1 AND request_key=$2",
+               [recipient, original.idempotency_key]
+             ).rows
   end
 
   test "insufficient or self transfers do not create wallets or ledger legs" do
     sender = user_id()
     recipient = user_id()
-    insufficient = request("wallet.transfer", sender, user_id(), %{"recipient_user_id" => recipient, "amount" => "1"})
+
+    insufficient =
+      request("wallet.transfer", sender, user_id(), %{
+        "recipient_user_id" => recipient,
+        "amount" => "1"
+      })
+
     assert {:ok, result} = Accounts.execute(insufficient)
     assert result["error"]["code"] == "INSUFFICIENT_FUNDS"
-    assert [[0]] = Sql.query!("SELECT count(*) FROM economy_accounts WHERE user_id IN ($1,$2)", [sender, recipient]).rows
-    assert [[0]] = Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [insufficient.idempotency_key]).rows
 
-    self_transfer = request("wallet.transfer", sender, user_id(), %{"recipient_user_id" => sender, "amount" => "1"})
+    assert [[0]] =
+             Sql.query!("SELECT count(*) FROM economy_accounts WHERE user_id IN ($1,$2)", [
+               sender,
+               recipient
+             ]).rows
+
+    assert [[0]] =
+             Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [
+               insufficient.idempotency_key
+             ]).rows
+
+    self_transfer =
+      request("wallet.transfer", sender, user_id(), %{
+        "recipient_user_id" => sender,
+        "amount" => "1"
+      })
+
     assert {:ok, self_result} = Accounts.execute(self_transfer)
     assert self_result["error"]["code"] == "INVALID_TARGET"
-    assert [[0]] = Sql.query!("SELECT count(*) FROM economy_accounts WHERE user_id=$1", [sender]).rows
+
+    assert [[0]] =
+             Sql.query!("SELECT count(*) FROM economy_accounts WHERE user_id=$1", [sender]).rows
   end
 
   test "ledger failure rolls the entire transfer and idempotency record back" do
     sender = user_id()
     recipient = user_id()
     assert {:ok, _} = Accounts.execute(request("daily.claim", sender, user_id()))
-    request = request("wallet.transfer", sender, user_id(), %{"recipient_user_id" => recipient, "amount" => "25"})
+
+    request =
+      request("wallet.transfer", sender, user_id(), %{
+        "recipient_user_id" => recipient,
+        "amount" => "25"
+      })
+
     suffix = String.replace(Ecto.UUID.generate(), "-", "")
     function_name = "reject_transfer_in_" <> suffix
     trigger_name = "reject_transfer_in_trigger_" <> suffix
 
     Sql.query!("""
-      CREATE FUNCTION #{function_name}() RETURNS trigger LANGUAGE plpgsql AS $$
-      BEGIN
-        IF NEW.reason_code = 'TRANSFER_IN' THEN RAISE EXCEPTION 'test rollback'; END IF;
-        RETURN NEW;
-      END $$
-      """)
-    Sql.query!("CREATE TRIGGER #{trigger_name} BEFORE INSERT ON economy_v2_ledger_entries FOR EACH ROW EXECUTE FUNCTION #{function_name}()")
+    CREATE FUNCTION #{function_name}() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.reason_code = 'TRANSFER_IN' THEN RAISE EXCEPTION 'test rollback'; END IF;
+      RETURN NEW;
+    END $$
+    """)
+
+    Sql.query!(
+      "CREATE TRIGGER #{trigger_name} BEFORE INSERT ON economy_v2_ledger_entries FOR EACH ROW EXECUTE FUNCTION #{function_name}()"
+    )
 
     try do
       assert {:error, "SERVICE_UNAVAILABLE"} = Accounts.execute(request)
-      assert [[150]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [sender]).rows
-      assert [[0]] = Sql.query!("SELECT count(*) FROM economy_accounts WHERE user_id=$1", [recipient]).rows
-      assert [[0]] = Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [request.idempotency_key]).rows
-      assert [[0]] = Sql.query!("SELECT count(*) FROM economy_v2_requests WHERE idempotency_key=$1", [request.idempotency_key]).rows
+
+      assert [[150]] =
+               Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [sender]).rows
+
+      assert [[0]] =
+               Sql.query!("SELECT count(*) FROM economy_accounts WHERE user_id=$1", [recipient]).rows
+
+      assert [[0]] =
+               Sql.query!("SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1", [
+                 request.idempotency_key
+               ]).rows
+
+      assert [[0]] =
+               Sql.query!("SELECT count(*) FROM economy_v2_requests WHERE idempotency_key=$1", [
+                 request.idempotency_key
+               ]).rows
     after
       Sql.query!("DROP TRIGGER IF EXISTS #{trigger_name} ON economy_v2_ledger_entries")
       Sql.query!("DROP FUNCTION IF EXISTS #{function_name}()")
@@ -399,9 +532,19 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     target = user_id()
     product = "api_test_" <> String.slice(Ecto.UUID.generate(), 0, 8)
 
-    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,0),($2,4821)", [actor, target])
-    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'fish',3)", [target])
-    Sql.query!("INSERT INTO economy_equipment(user_id,slot,item_id) VALUES ($1,'rod','fishing_rod')", [target])
+    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,0),($2,4821)", [
+      actor,
+      target
+    ])
+
+    Sql.query!("INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'fish',3)", [
+      target
+    ])
+
+    Sql.query!(
+      "INSERT INTO economy_equipment(user_id,slot,item_id) VALUES ($1,'rod','fishing_rod')",
+      [target]
+    )
 
     Sql.query!(
       """
@@ -426,29 +569,72 @@ defmodule ToriEconomy.LedgerIntegrationTest do
       Sql.query!("DELETE FROM economy_market_products WHERE product_id=$1", [product])
     end)
 
-    assert {:ok, inventory} = Queries.execute(request("inventory.list", actor, user_id()) |> put_in([:context, "target_user_id"], target))
-    assert inventory["result"]["user_id"] == target
-    assert [%{"item_id" => "fish", "quantity" => "3", "name" => "fish"}] =
-      Enum.map(inventory["result"]["items"], &Map.take(&1, ["item_id", "quantity", "name"]))
+    assert {:ok, inventory} =
+             Queries.execute(
+               request("inventory.list", actor, user_id())
+               |> put_in([:context, "target_user_id"], target)
+             )
 
-    assert {:ok, profile} = Queries.execute(request("profile.snapshot", actor, user_id()) |> put_in([:context, "target_user_id"], target))
+    assert inventory["result"]["user_id"] == target
+
+    assert [%{"item_id" => "fish", "quantity" => "3", "name" => "fish"}] =
+             Enum.map(
+               inventory["result"]["items"],
+               &Map.take(&1, ["item_id", "quantity", "name"])
+             )
+
+    assert {:ok, profile} =
+             Queries.execute(
+               request("profile.snapshot", actor, user_id())
+               |> put_in([:context, "target_user_id"], target)
+             )
+
     assert profile["result"]["balance"] == "4821"
+
     assert [%{"item_id" => "fish", "quantity" => "3"}] =
-      Enum.map(profile["result"]["items"], &Map.take(&1, ["item_id", "quantity"]))
+             Enum.map(profile["result"]["items"], &Map.take(&1, ["item_id", "quantity"]))
+
     assert profile["result"]["equipment"] == [%{"slot" => "rod", "item_id" => "fishing_rod"}]
 
-    assert {:ok, catalog} = Queries.execute(request("shop.catalog", actor, user_id(), %{"category" => "api_test"}))
-    assert [%{"product_id" => ^product, "current_price" => "314", "effective_price" => "314", "stock" => "-1", "available" => true}] =
+    assert {:ok, catalog} =
+             Queries.execute(
+               request("shop.catalog", actor, user_id(), %{"category" => "api_test"})
+             )
+
+    assert [
+             %{
+               "product_id" => ^product,
+               "current_price" => "314",
+               "effective_price" => "314",
+               "stock" => "-1",
+               "available" => true
+             }
+           ] =
              catalog["result"]["products"]
 
-    assert {:ok, detail} = Market.execute(request("market.product", actor, user_id(), %{"product_id" => product}))
+    assert {:ok, detail} =
+             Market.execute(
+               request("market.product", actor, user_id(), %{"product_id" => product})
+             )
+
     assert detail["result"]["current_price"] == "314"
     assert detail["result"]["stock"] == "-1"
-    assert {:ok, history} = Market.execute(request("market.history", actor, user_id(), %{"product_id" => product}))
-    assert [%{"price" => "314", "reason" => "ADMIN_CHANGE"}] = history["result"]["points"] |> Enum.map(&Map.drop(&1, ["changed_at"]))
 
-    assert {:ok, leaderboard} = Queries.execute(request("wallet.leaderboard", actor, user_id(), %{"limit" => 100}))
-    assert Enum.any?(leaderboard["result"]["entries"], &(&1["user_id"] == target and &1["balance"] == "4821"))
+    assert {:ok, history} =
+             Market.execute(
+               request("market.history", actor, user_id(), %{"product_id" => product})
+             )
+
+    assert [%{"price" => "314", "reason" => "ADMIN_CHANGE"}] =
+             history["result"]["points"] |> Enum.map(&Map.drop(&1, ["changed_at"]))
+
+    assert {:ok, leaderboard} =
+             Queries.execute(request("wallet.leaderboard", actor, user_id(), %{"limit" => 100}))
+
+    assert Enum.any?(
+             leaderboard["result"]["entries"],
+             &(&1["user_id"] == target and &1["balance"] == "4821")
+           )
 
     previous_secret = System.get_env("TORI_ECONOMY_API_SECRET")
     previous_writes = System.get_env("TORI_ECONOMY_WRITE_ENABLED")
@@ -456,8 +642,13 @@ defmodule ToriEconomy.LedgerIntegrationTest do
     System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
 
     on_exit(fn ->
-      if previous_secret, do: System.put_env("TORI_ECONOMY_API_SECRET", previous_secret), else: System.delete_env("TORI_ECONOMY_API_SECRET")
-      if previous_writes, do: System.put_env("TORI_ECONOMY_WRITE_ENABLED", previous_writes), else: System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
+      if previous_secret,
+        do: System.put_env("TORI_ECONOMY_API_SECRET", previous_secret),
+        else: System.delete_env("TORI_ECONOMY_API_SECRET")
+
+      if previous_writes,
+        do: System.put_env("TORI_ECONOMY_WRITE_ENABLED", previous_writes),
+        else: System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
     end)
 
     for {operation, args} <- [
@@ -472,8 +663,12 @@ defmodule ToriEconomy.LedgerIntegrationTest do
         "request_id" => request_id(),
         "idempotency_key" => nil,
         "operation" => operation,
-        "context" => %{"actor_user_id" => actor, "target_user_id" => target,
-          "guild_id" => "234567890123456789", "channel_id" => "345678901234567890"},
+        "context" => %{
+          "actor_user_id" => actor,
+          "target_user_id" => target,
+          "guild_id" => "234567890123456789",
+          "channel_id" => "345678901234567890"
+        },
         "args" => args
       }
 
@@ -487,7 +682,13 @@ defmodule ToriEconomy.LedgerIntegrationTest do
       assert Jason.decode!(response.resp_body)["status"] == "ok"
     end
 
-    assert [[0]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [actor]).rows
-    assert [[3]] = Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='fish'", [target]).rows
+    assert [[0]] =
+             Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [actor]).rows
+
+    assert [[3]] =
+             Sql.query!(
+               "SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='fish'",
+               [target]
+             ).rows
   end
 end

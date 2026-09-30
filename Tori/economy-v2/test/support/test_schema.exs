@@ -15,17 +15,24 @@ defmodule ToriEconomy.TestSchema do
         migrations = migrations!()
 
         {:ok, :ok} =
-          Repo.transaction(fn ->
-            SQL.query!(Repo, "SELECT pg_advisory_xact_lock(hashtext('tori-economy-test-schema'))", [])
+          Repo.transaction(
+            fn ->
+              SQL.query!(
+                Repo,
+                "SELECT pg_advisory_xact_lock(hashtext('tori-economy-test-schema'))",
+                []
+              )
 
-            if public_tables() == [] do
-              Enum.each(migrations, fn {_version, path} ->
-                SQL.query!(Repo, File.read!(path), [], query_type: :text)
-              end)
-            end
+              if public_tables() == [] do
+                Enum.each(migrations, fn {_version, path} ->
+                  SQL.query!(Repo, File.read!(path), [], query_type: :text)
+                end)
+              end
 
-            verify_schema!(migrations)
-          end, timeout: :infinity)
+              verify_schema!(migrations)
+            end,
+            timeout: :infinity
+          )
 
         :ok
     end
@@ -55,8 +62,11 @@ defmodule ToriEconomy.TestSchema do
     end
 
     case config_mismatch(Repo.config(), uri, database) do
-      nil -> :ok
-      field -> raise "The application Repo differs from TORI_ECONOMY_TEST_DATABASE_URL in #{field}"
+      nil ->
+        :ok
+
+      field ->
+        raise "The application Repo differs from TORI_ECONOMY_TEST_DATABASE_URL in #{field}"
     end
 
     unless SQL.query!(Repo, "SELECT current_database()", []).rows == [[database]] do
@@ -104,6 +114,7 @@ defmodule ToriEconomy.TestSchema do
       |> Enum.sort_by(&elem(&1, 0))
 
     versions = Enum.map(migrations, &elem(&1, 0))
+
     unless versions != [] and versions == Enum.to_list(1..length(versions)) do
       raise "Expected consecutive Tori Flyway SQL migrations starting at V1"
     end
@@ -124,7 +135,9 @@ defmodule ToriEconomy.TestSchema do
       |> List.flatten()
 
     expected_indexes =
-      Regex.scan(~r/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+([a-z][a-z0-9_]*)\s+/i, sql, capture: :all_but_first)
+      Regex.scan(~r/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+([a-z][a-z0-9_]*)\s+/i, sql,
+        capture: :all_but_first
+      )
       |> List.flatten()
 
     indexes =
@@ -139,7 +152,11 @@ defmodule ToriEconomy.TestSchema do
     end
 
     columns =
-      SQL.query!(Repo, "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'economy_accounts'", []).rows
+      SQL.query!(
+        Repo,
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'economy_accounts'",
+        []
+      ).rows
       |> Enum.map(&hd/1)
 
     unless Enum.all?(["last_daily_at", "last_beg_at", "last_work_at"], &(&1 in columns)) do
@@ -147,30 +164,60 @@ defmodule ToriEconomy.TestSchema do
     end
 
     catalog_columns =
-      SQL.query!(Repo, "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'economy_v2_catalog_items'", []).rows
+      SQL.query!(
+        Repo,
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'economy_v2_catalog_items'",
+        []
+      ).rows
       |> Enum.map(&hd/1)
 
-    unless Enum.all?(["subcategory", "rarity", "rotation_weight", "equip_slots", "max_stack",
-                      "cosmetic_slots", "career_requirement", "career_level_requirement"],
-             &(&1 in catalog_columns)) do
+    unless Enum.all?(
+             [
+               "subcategory",
+               "rarity",
+               "rotation_weight",
+               "equip_slots",
+               "max_stack",
+               "cosmetic_slots",
+               "career_requirement",
+               "career_level_requirement"
+             ],
+             &(&1 in catalog_columns)
+           ) do
       raise "Incomplete Tori test schema: additive catalog columns are missing"
     end
 
-    [[catalog_count]] = SQL.query!(Repo, "SELECT count(*) FROM economy_v2_catalog_items WHERE active", []).rows
+    [[catalog_count]] =
+      SQL.query!(Repo, "SELECT count(*) FROM economy_v2_catalog_items WHERE active", []).rows
+
     unless catalog_count >= 125 do
       raise "Incomplete Tori test schema: expanded catalog migration is missing"
     end
 
-    unless Enum.all?(["economy_v2_career_selections", "economy_v2_career_actions",
-                      "economy_v2_cosmetic_selections"], &(&1 in public_tables())) do
+    unless Enum.all?(
+             [
+               "economy_v2_career_selections",
+               "economy_v2_career_actions",
+               "economy_v2_cosmetic_selections"
+             ],
+             &(&1 in public_tables())
+           ) do
       raise "Incomplete Tori test schema: progression or cosmetic selection schema is missing"
     end
 
-    unless SQL.query!(Repo, "SELECT count(*) FROM economy_v2_catalog_items WHERE item_id='leopard_baby_tee'", []).rows == [[1]] do
+    unless SQL.query!(
+             Repo,
+             "SELECT count(*) FROM economy_v2_catalog_items WHERE item_id='leopard_baby_tee'",
+             []
+           ).rows == [[1]] do
       raise "Incomplete Tori test schema: original catalog seed is missing"
     end
 
-    unless SQL.query!(Repo, "SELECT tool_slot,durability FROM economy_v2_catalog_items WHERE item_id='fishing_rod'", []).rows == [["rod", 40]] do
+    unless SQL.query!(
+             Repo,
+             "SELECT tool_slot,durability FROM economy_v2_catalog_items WHERE item_id='fishing_rod'",
+             []
+           ).rows == [["rod", 40]] do
       raise "Incomplete Tori test schema: legacy activity catalog is missing or incompatible"
     end
 

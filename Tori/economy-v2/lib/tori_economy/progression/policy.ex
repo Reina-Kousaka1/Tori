@@ -25,15 +25,20 @@ defmodule ToriEconomy.Progression.Policy do
 
   def level_for(xp, thresholds) when is_integer(xp) and xp >= 0 and xp <= @max_xp do
     with :ok <- validate_thresholds(thresholds) do
-      current = Enum.reduce_while(thresholds, hd(thresholds), fn threshold, level ->
-        if threshold.required_xp <= xp, do: {:cont, threshold}, else: {:halt, level}
-      end)
+      current =
+        Enum.reduce_while(thresholds, hd(thresholds), fn threshold, level ->
+          if threshold.required_xp <= xp, do: {:cont, threshold}, else: {:halt, level}
+        end)
 
       next = Enum.find(thresholds, &(&1.level == current.level + 1))
 
       {:ok,
-       %{level: current.level, xp: xp, level_start_xp: current.required_xp,
-         next_level_xp: if(next, do: next.required_xp, else: nil)}}
+       %{
+         level: current.level,
+         xp: xp,
+         level_start_xp: current.required_xp,
+         next_level_xp: if(next, do: next.required_xp, else: nil)
+       }}
     end
   end
 

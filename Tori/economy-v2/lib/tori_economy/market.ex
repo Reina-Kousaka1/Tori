@@ -13,18 +13,43 @@ defmodule ToriEconomy.Market do
            """,
            [id]
          ).rows do
-      [[product_id, name, description, category, price, base, minimum, maximum, stock, available, rarity]] ->
+      [
+        [
+          product_id,
+          name,
+          description,
+          category,
+          price,
+          base,
+          minimum,
+          maximum,
+          stock,
+          available,
+          rarity
+        ]
+      ] ->
         ok(request, %{
-          "type" => "market_product", "product_id" => product_id, "name" => name,
-          "description" => description, "category" => category,
-          "current_price" => Integer.to_string(price), "base_price" => Integer.to_string(base),
-          "minimum_price" => Integer.to_string(minimum), "maximum_price" => Integer.to_string(maximum),
-          "stock" => Integer.to_string(stock), "available" => available, "rarity" => rarity
+          "type" => "market_product",
+          "product_id" => product_id,
+          "name" => name,
+          "description" => description,
+          "category" => category,
+          "current_price" => Integer.to_string(price),
+          "base_price" => Integer.to_string(base),
+          "minimum_price" => Integer.to_string(minimum),
+          "maximum_price" => Integer.to_string(maximum),
+          "stock" => Integer.to_string(stock),
+          "available" => available,
+          "rarity" => rarity
         })
 
       [] ->
-        {:ok, %{"request_id" => request.request_id, "status" => "error",
-                "error" => %{"code" => "ITEM_NOT_FOUND", "retryable" => false}}}
+        {:ok,
+         %{
+           "request_id" => request.request_id,
+           "status" => "error",
+           "error" => %{"code" => "ITEM_NOT_FOUND", "retryable" => false}
+         }}
     end
   end
 
@@ -41,8 +66,11 @@ defmodule ToriEconomy.Market do
         [id, limit]
       ).rows
       |> Enum.map(fn [price, changed_at, reason] ->
-        %{"price" => Integer.to_string(price), "changed_at" => DateTime.to_iso8601(changed_at),
-          "reason" => reason}
+        %{
+          "price" => Integer.to_string(price),
+          "changed_at" => DateTime.to_iso8601(changed_at),
+          "reason" => reason
+        }
       end)
 
     ok(request, %{"type" => "market_history", "product_id" => id, "points" => points})

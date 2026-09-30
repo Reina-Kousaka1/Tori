@@ -16,8 +16,12 @@ defmodule ToriEconomy.Shop do
         pages = max(1, div(total + @page_size - 1, @page_size))
         page = min(Map.get(request.args, "page", 0), pages - 1)
         selected = Enum.slice(visible, page * @page_size, @page_size)
-        [[now_epoch]] = Sql.query!("SELECT floor(extract(epoch from now())::numeric)::bigint").rows
-        result = rotation
+
+        [[now_epoch]] =
+          Sql.query!("SELECT floor(extract(epoch from now())::numeric)::bigint").rows
+
+        result =
+          rotation
           |> Map.put("items", selected)
           |> Map.put("rare_drop", Enum.count(items, &(&1["rarity"] in ["rare", "special"])) >= 3)
           |> Map.put("category", category)
@@ -26,9 +30,15 @@ defmodule ToriEconomy.Shop do
           |> Map.put("total_items", total)
           |> Map.put("total_pages", pages)
           |> Map.put("presentation_key", "shop.rotation.ready")
-          |> Map.put("refresh_in_seconds", max(0, String.to_integer(rotation["ends_at_epoch"]) - now_epoch))
+          |> Map.put(
+            "refresh_in_seconds",
+            max(0, String.to_integer(rotation["ends_at_epoch"]) - now_epoch)
+          )
+
         {:ok, %{"request_id" => request.request_id, "status" => "ok", "result" => result}}
-      error -> error
+
+      error ->
+        error
     end
   end
 
@@ -38,11 +48,18 @@ defmodule ToriEconomy.Shop do
 
     with {:ok, rotation} <- Rotation.current(),
          true <- rotation["period_key"] == requested_period || {:error, "ITEM_NOT_AVAILABLE"},
-         item when not is_nil(item) <- Enum.find(rotation["items"], &(&1["item_id"] == request.args["item_id"])) do
+         item when not is_nil(item) <-
+           Enum.find(rotation["items"], &(&1["item_id"] == request.args["item_id"])) do
       [item] = annotate_items([item], user)
-      detail = item |> Map.put("type", "shop_item") |> Map.put("period_key", rotation["period_key"])
-      detail = if item["rarity"] in ["rare", "special"],
-        do: Map.put(detail, "presentation_key", "shop.item.rare"), else: detail
+
+      detail =
+        item |> Map.put("type", "shop_item") |> Map.put("period_key", rotation["period_key"])
+
+      detail =
+        if item["rarity"] in ["rare", "special"],
+          do: Map.put(detail, "presentation_key", "shop.item.rare"),
+          else: detail
+
       {:ok, %{"request_id" => request.request_id, "status" => "ok", "result" => detail}}
     else
       {:error, code} -> {:error, code}
@@ -53,47 +70,77 @@ defmodule ToriEconomy.Shop do
 
   def execute(%{operation: "shop.purchase"} = request) do
     Idempotency.run(request, fn -> purchase(request) end,
-      skip_persist_errors: ["ITEM_NOT_FOUND", "ITEM_NOT_AVAILABLE", "INSUFFICIENT_FUNDS",
-                            "INVALID_QUANTITY", "MAX_STACK_REACHED", "ALREADY_OWNED",
-                            "REQUIREMENT_NOT_MET"])
+      skip_persist_errors: [
+        "ITEM_NOT_FOUND",
+        "ITEM_NOT_AVAILABLE",
+        "INSUFFICIENT_FUNDS",
+        "INVALID_QUANTITY",
+        "MAX_STACK_REACHED",
+        "ALREADY_OWNED",
+        "REQUIREMENT_NOT_MET"
+      ]
+    )
   end
 
   defp annotate_items(items, user) do
     ids = Enum.map(items, & &1["item_id"])
-    owned = case ids do
-      [] -> %{}
-      _ ->
-        Sql.query!("SELECT item_id,quantity FROM economy_inventory WHERE user_id=$1 AND item_id=ANY($2::text[])",
-          [user, ids]).rows
-        |> Map.new(fn [id, quantity] -> {id, quantity} end)
-    end
-    level = case Sql.query!("""
-      SELECT coalesce(max(level),1) FROM economy_v2_xp_thresholds
-      WHERE required_xp<=coalesce((SELECT xp FROM economy_v2_account_progress WHERE user_id=$1),0)
-    """, [user]).rows do
-      [[value]] -> value
-    end
-    career_levels = Sql.query!("""
-      SELECT p.career_code,coalesce(max(t.level),1)
-      FROM economy_v2_career_progress p
-      LEFT JOIN economy_v2_xp_thresholds t ON t.required_xp<=coalesce(p.xp,0)
-      WHERE p.user_id=$1 GROUP BY p.career_code
-    """, [user]).rows
-    |> Map.new(fn [code, career_level] -> {code, career_level} end)
+
+    owned =
+      case ids do
+        [] ->
+          %{}
+
+        _ ->
+          Sql.query!(
+            "SELECT item_id,quantity FROM economy_inventory WHERE user_id=$1 AND item_id=ANY($2::text[])",
+            [user, ids]
+          ).rows
+          |> Map.new(fn [id, quantity] -> {id, quantity} end)
+      end
+
+    level =
+      case Sql.query!(
+             """
+               SELECT coalesce(max(level),1) FROM economy_v2_xp_thresholds
+               WHERE required_xp<=coalesce((SELECT xp FROM economy_v2_account_progress WHERE user_id=$1),0)
+             """,
+             [user]
+           ).rows do
+        [[value]] -> value
+      end
+
+    career_levels =
+      Sql.query!(
+        """
+          SELECT p.career_code,coalesce(max(t.level),1)
+          FROM economy_v2_career_progress p
+          LEFT JOIN economy_v2_xp_thresholds t ON t.required_xp<=coalesce(p.xp,0)
+          WHERE p.user_id=$1 GROUP BY p.career_code
+        """,
+        [user]
+      ).rows
+      |> Map.new(fn [code, career_level] -> {code, career_level} end)
 
     Enum.map(items, fn item ->
       quantity = Map.get(owned, item["item_id"], 0)
       remaining = item["remaining"]
       available = is_nil(remaining) or String.to_integer(remaining) > 0
-      career_ok = is_nil(item["career_requirement"]) or
-        Map.get(career_levels, item["career_requirement"], 1) >= item["career_level_requirement"]
+
+      career_ok =
+        is_nil(item["career_requirement"]) or
+          Map.get(career_levels, item["career_requirement"], 1) >=
+            item["career_level_requirement"]
+
       eligible = level >= item["level_requirement"] and career_ok
-      state = cond do
-        not available -> "sold"
-        not eligible -> "locked"
-        quantity > 0 -> "owned"
-        true -> "available"
-      end
+
+      state =
+        cond do
+          not available -> "sold"
+          not eligible -> "locked"
+          quantity > 0 -> "owned"
+          true -> "available"
+        end
+
       item
       |> Map.put("owned_quantity", Integer.to_string(quantity))
       |> Map.put("player_level", level)
@@ -112,27 +159,51 @@ defmodule ToriEconomy.Shop do
     period_key = String.to_integer(request.args["period_key"])
 
     # Serialize wallet and inventory mutations on the global account row.
-    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1) ON CONFLICT DO NOTHING", [user_id])
-    [[balance]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1 FOR UPDATE", [user_id]).rows
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1) ON CONFLICT DO NOTHING", [
+      user_id
+    ])
+
+    [[balance]] =
+      Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1 FOR UPDATE", [user_id]).rows
 
     with {:ok, item} <- Catalog.fetch_for_update(item_id),
          {:ok, unit_price} <- available_item(period_key, item_id, amount),
          :ok <- requirements(user_id, item, amount),
          total = unit_price * amount,
          true <- balance >= total || {:error, "INSUFFICIENT_FUNDS"},
-         {:ok, after_quantity} <- Inventory.grant(user_id, item, amount, request, "shop_grant", "SHOP_PURCHASE") do
+         {:ok, after_quantity} <-
+           Inventory.grant(user_id, item, amount, request, "shop_grant", "SHOP_PURCHASE") do
       remaining = balance - total
-      Sql.query!("UPDATE economy_accounts SET balance=$2,updated_at=now() WHERE user_id=$1", [user_id, remaining])
-      Sql.query!("""
-      INSERT INTO economy_v2_ledger_entries
-        (user_id,request_key,leg,delta,balance_after,reason_code,guild_id)
-      VALUES ($1,$2,'shop_debit',$3,$4,'SHOP_PURCHASE',$5)
-      """, [user_id, request.idempotency_key, -total, remaining, request.context["guild_id"]])
-      Sql.query!("UPDATE economy_v2_shop_rotation_items SET sold=sold+$3 WHERE period_key=$1 AND item_id=$2",
-        [period_key, item_id, amount])
-      ok(%{"type" => "shop_purchase", "item_id" => item_id, "item_name" => item.name, "quantity" => amount,
-           "quantity_after" => Integer.to_string(after_quantity), "spent" => Integer.to_string(total),
-           "balance" => Integer.to_string(remaining), "presentation_key" => "shop.purchase.success"})
+
+      Sql.query!("UPDATE economy_accounts SET balance=$2,updated_at=now() WHERE user_id=$1", [
+        user_id,
+        remaining
+      ])
+
+      Sql.query!(
+        """
+        INSERT INTO economy_v2_ledger_entries
+          (user_id,request_key,leg,delta,balance_after,reason_code,guild_id)
+        VALUES ($1,$2,'shop_debit',$3,$4,'SHOP_PURCHASE',$5)
+        """,
+        [user_id, request.idempotency_key, -total, remaining, request.context["guild_id"]]
+      )
+
+      Sql.query!(
+        "UPDATE economy_v2_shop_rotation_items SET sold=sold+$3 WHERE period_key=$1 AND item_id=$2",
+        [period_key, item_id, amount]
+      )
+
+      ok(%{
+        "type" => "shop_purchase",
+        "item_id" => item_id,
+        "item_name" => item.name,
+        "quantity" => amount,
+        "quantity_after" => Integer.to_string(after_quantity),
+        "spent" => Integer.to_string(total),
+        "balance" => Integer.to_string(remaining),
+        "presentation_key" => "shop.purchase.success"
+      })
     else
       {:error, code} -> error(code)
       false -> error("INSUFFICIENT_FUNDS")
@@ -140,13 +211,16 @@ defmodule ToriEconomy.Shop do
   end
 
   defp available_item(period_key, item_id, amount) do
-    case Sql.query!("""
-         SELECT r.unit_price,r.stock_limit,r.sold
-         FROM economy_v2_shop_rotation_items r
-         JOIN economy_v2_shop_rotations s ON s.period_key=r.period_key
-         WHERE r.period_key=$1 AND r.item_id=$2 AND s.starts_at<=now() AND s.ends_at>now()
-         FOR UPDATE OF r
-         """, [period_key, item_id]).rows do
+    case Sql.query!(
+           """
+           SELECT r.unit_price,r.stock_limit,r.sold
+           FROM economy_v2_shop_rotation_items r
+           JOIN economy_v2_shop_rotations s ON s.period_key=r.period_key
+           WHERE r.period_key=$1 AND r.item_id=$2 AND s.starts_at<=now() AND s.ends_at>now()
+           FOR UPDATE OF r
+           """,
+           [period_key, item_id]
+         ).rows do
       [[price, limit, sold]] when is_nil(limit) or sold <= limit - amount -> {:ok, price}
       _ -> {:error, "ITEM_NOT_AVAILABLE"}
     end
@@ -154,30 +228,54 @@ defmodule ToriEconomy.Shop do
 
   defp requirements(user_id, item, amount) do
     current = Inventory.quantity(user_id, item.id)
-    level = case Sql.query!("""
-      SELECT coalesce(max(level),1) FROM economy_v2_xp_thresholds
-      WHERE required_xp <= coalesce((SELECT xp FROM economy_v2_account_progress WHERE user_id=$1),0)
-      """, [user_id]).rows do [[value]] -> value end
+
+    level =
+      case Sql.query!(
+             """
+             SELECT coalesce(max(level),1) FROM economy_v2_xp_thresholds
+             WHERE required_xp <= coalesce((SELECT xp FROM economy_v2_account_progress WHERE user_id=$1),0)
+             """,
+             [user_id]
+           ).rows do
+        [[value]] -> value
+      end
+
     cond do
-      not item.active -> {:error, "ITEM_NOT_AVAILABLE"}
-      amount < 1 or amount > 100 -> {:error, "INVALID_QUANTITY"}
-      current > (item.max_stack || 9_223_372_036_854_775_807) - amount -> {:error, "MAX_STACK_REACHED"}
-      not item.stackable and current > 0 -> {:error, "ALREADY_OWNED"}
-      level < item.level_requirement -> {:error, "REQUIREMENT_NOT_MET"}
+      not item.active ->
+        {:error, "ITEM_NOT_AVAILABLE"}
+
+      amount < 1 or amount > 100 ->
+        {:error, "INVALID_QUANTITY"}
+
+      current > (item.max_stack || 9_223_372_036_854_775_807) - amount ->
+        {:error, "MAX_STACK_REACHED"}
+
+      not item.stackable and current > 0 ->
+        {:error, "ALREADY_OWNED"}
+
+      level < item.level_requirement ->
+        {:error, "REQUIREMENT_NOT_MET"}
+
       not career_unlocked?(user_id, item.career_requirement, item.career_level_requirement) ->
         {:error, "REQUIREMENT_NOT_MET"}
-      true -> :ok
+
+      true ->
+        :ok
     end
   end
 
   defp career_unlocked?(_user, nil, _required_level), do: true
+
   defp career_unlocked?(user, required_career, required_level) do
-    case Sql.query!("""
-      SELECT p.career_code,coalesce(max(t.level),1)
-      FROM economy_v2_career_progress p
-      LEFT JOIN economy_v2_xp_thresholds t ON t.required_xp<=coalesce(p.xp,0)
-      WHERE p.user_id=$1 GROUP BY p.career_code
-    """, [user]).rows do
+    case Sql.query!(
+           """
+             SELECT p.career_code,coalesce(max(t.level),1)
+             FROM economy_v2_career_progress p
+             LEFT JOIN economy_v2_xp_thresholds t ON t.required_xp<=coalesce(p.xp,0)
+             WHERE p.user_id=$1 GROUP BY p.career_code
+           """,
+           [user]
+         ).rows do
       [[^required_career, career_level]] -> career_level >= required_level
       _ -> false
     end

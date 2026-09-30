@@ -51,8 +51,13 @@ defmodule ToriEconomy.PersonaTest do
     serious = Persona.snapshot(context: :moderation, mood: mood, date: ~D[2026-04-01])
 
     assert Persona.render("daily.success", %{"amount" => 150}, playful) =~ "🎀"
-    assert Persona.render("daily.success", %{"amount" => 150}, serious) == "You received 150 Credits."
+
+    assert Persona.render("daily.success", %{"amount" => 150}, serious) ==
+             "You received 150 Credits."
+
     assert Persona.render("unknown.key", %{}, playful) == "unknown.key"
-    assert Persona.render("daily.cooldown", %{}, playful) == "Your next claim is available in %{cooldown}."
+
+    assert Persona.render("daily.cooldown", %{}, playful) ==
+             "Your next claim is available in %{cooldown}."
   end
 end

@@ -43,10 +43,16 @@ defmodule ToriEconomy.Api do
     case authorized(conn) do
       :ok ->
         state = Persona.snapshot()
-        reply(conn, 200, %{"identity" => "tori", "mood" => Atom.to_string(state.mood),
-                           "intensity" => state.intensity, "season" => Atom.to_string(state.season)})
 
-      _ -> reply(conn, 401, error(nil, "FORBIDDEN", false))
+        reply(conn, 200, %{
+          "identity" => "tori",
+          "mood" => Atom.to_string(state.mood),
+          "intensity" => state.intensity,
+          "season" => Atom.to_string(state.season)
+        })
+
+      _ ->
+        reply(conn, 401, error(nil, "FORBIDDEN", false))
     end
   end
 
@@ -55,9 +61,16 @@ defmodule ToriEconomy.Api do
       :ok ->
         state = Persona.snapshot()
         seed = div(System.system_time(:second), 900)
-        reply(conn, 200, %{"status" => "ok", "suggestion" => Presence.choose(state, seed),
-                           "mood" => Atom.to_string(state.mood), "season" => Atom.to_string(state.season)})
-      _ -> reply(conn, 401, error(nil, "FORBIDDEN", false))
+
+        reply(conn, 200, %{
+          "status" => "ok",
+          "suggestion" => Presence.choose(state, seed),
+          "mood" => Atom.to_string(state.mood),
+          "season" => Atom.to_string(state.season)
+        })
+
+      _ ->
+        reply(conn, 401, error(nil, "FORBIDDEN", false))
     end
   end
 
@@ -69,8 +82,11 @@ defmodule ToriEconomy.Api do
          true <- map_size(payload) == 1,
          {:ok, event} <- Mood.event_from_name(name),
          {:ok, state} <- record_mood_event(event) do
-      reply(conn, 200, %{"status" => "ok", "mood" => Atom.to_string(state.mood),
-                         "intensity" => state.intensity})
+      reply(conn, 200, %{
+        "status" => "ok",
+        "mood" => Atom.to_string(state.mood),
+        "intensity" => state.intensity
+      })
     else
       {:error, "UNAUTHORIZED"} -> reply(conn, 401, error(nil, "FORBIDDEN", false))
       {:error, :unavailable} -> reply(conn, 503, error(nil, "SERVICE_UNAVAILABLE", true))
@@ -88,14 +104,17 @@ defmodule ToriEconomy.Api do
     with :ok <- authorized(conn),
          :ok <- json_content_type(conn),
          {:ok, body, conn} <- read_body(conn, length: 2048),
-         {:ok, %{"key" => key, "context" => context_name, "variables" => variables} = payload} <- Jason.decode(body),
-         true <- map_size(payload) == 3 and is_binary(key) and byte_size(key) <= 100 and
-                   Regex.match?(~r/^[a-z]+(?:\.[a-z_]+)*$/, key),
+         {:ok, %{"key" => key, "context" => context_name, "variables" => variables} = payload} <-
+           Jason.decode(body),
+         true <-
+           map_size(payload) == 3 and is_binary(key) and byte_size(key) <= 100 and
+             Regex.match?(~r/^[a-z]+(?:\.[a-z_]+)*$/, key),
          true <- is_map(variables) and map_size(variables) <= 12,
-         true <- Enum.all?(variables, fn {name, value} ->
-           is_binary(name) and byte_size(name) <= 40 and
-             ((is_binary(value) and byte_size(value) <= 256) or is_integer(value))
-         end),
+         true <-
+           Enum.all?(variables, fn {name, value} ->
+             is_binary(name) and byte_size(name) <= 40 and
+               ((is_binary(value) and byte_size(value) <= 256) or is_integer(value))
+           end),
          {:ok, context} <- Persona.context_from_name(context_name) do
       phrase = Persona.render(key, variables, Persona.snapshot(context: context))
       reply(conn, 200, %{"status" => "ok", "text" => phrase})
@@ -138,21 +157,36 @@ defmodule ToriEconomy.Api do
     failure ->
       # No exception message, SQL text, request body or credential in logs.
       Logger.error("Economy request failed (#{inspect(failure.__struct__)})")
+
       try do
         Mood.record(:system_failure)
       catch
         :exit, _ -> :ok
       end
+
       reply(conn, 500, error(nil, "INTERNAL_ERROR", false))
   end
 
   # A running API is not permission to create a second wallet writer.
   defp writes_allowed(%{operation: operation})
-       when operation in ["wallet.balance", "inventory.list", "shop.catalog", "wallet.leaderboard",
-                          "profile.snapshot", "market.product", "market.history", "shop.rotation",
-                          "shop.item", "progression.snapshot", "career.snapshot",
-                          "marketplace.browse", "inventory.effects", "inventory.cosmetics",
-                          "inventory.item", "wardrobe.list"],
+       when operation in [
+              "wallet.balance",
+              "inventory.list",
+              "shop.catalog",
+              "wallet.leaderboard",
+              "profile.snapshot",
+              "market.product",
+              "market.history",
+              "shop.rotation",
+              "shop.item",
+              "progression.snapshot",
+              "career.snapshot",
+              "marketplace.browse",
+              "inventory.effects",
+              "inventory.cosmetics",
+              "inventory.item",
+              "wardrobe.list"
+            ],
        do: :ok
 
   defp writes_allowed(request) do

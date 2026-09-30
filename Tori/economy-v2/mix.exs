@@ -13,8 +13,10 @@ defmodule ToriEconomy.MixProject do
   end
 
   def application do
-    [extra_applications: [:logger, :crypto, :certifi, :gun, :inets, :jason, :mime],
-     mod: {ToriEconomy.Application, []}]
+    [
+      extra_applications: [:logger, :crypto, :certifi, :gun, :inets, :jason, :mime],
+      mod: {ToriEconomy.Application, []}
+    ]
   end
 
   defp deps do

@@ -11,7 +11,9 @@ defmodule ToriEconomy.ApiTest do
     System.put_env("TORI_ECONOMY_API_SECRET", String.duplicate("s", 32))
 
     on_exit(fn ->
-      if previous, do: System.put_env("TORI_ECONOMY_API_SECRET", previous), else: System.delete_env("TORI_ECONOMY_API_SECRET")
+      if previous,
+        do: System.put_env("TORI_ECONOMY_API_SECRET", previous),
+        else: System.delete_env("TORI_ECONOMY_API_SECRET")
     end)
   end
 
@@ -61,17 +63,25 @@ defmodule ToriEconomy.ApiTest do
     on_exit(fn -> Mood.reset() end)
 
     render = fn context ->
-      conn(:post, "/internal/persona/v1/render",
-        Jason.encode!(%{"key" => "shop.purchase.success", "context" => context,
-                        "variables" => %{"item_name" => "Bow", "amount" => 20}}))
+      conn(
+        :post,
+        "/internal/persona/v1/render",
+        Jason.encode!(%{
+          "key" => "shop.purchase.success",
+          "context" => context,
+          "variables" => %{"item_name" => "Bow", "amount" => 20}
+        })
+      )
       |> put_req_header("authorization", "Bearer " <> String.duplicate("s", 32))
       |> put_req_header("content-type", "application/json")
       |> Api.call([])
     end
 
     assert Jason.decode!(render.("shop").resp_body)["text"] =~ "✨"
+
     assert Jason.decode!(render.("administration").resp_body)["text"] ==
              "Purchased Bow for 20 Credits."
+
     assert render.("unknown").status == 400
   end
 
@@ -79,25 +89,28 @@ defmodule ToriEconomy.ApiTest do
     response = request("not json")
     assert response.status == 400
 
-    invalid = Jason.encode!(%{
-      "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
-      "idempotency_key" => "discord-interaction:123456789012345678",
-      "operation" => "daily.claim",
-      "context" => %{"actor_user_id" => 123, "guild_id" => "234", "channel_id" => "345"},
-      "args" => %{}
-    })
+    invalid =
+      Jason.encode!(%{
+        "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
+        "idempotency_key" => "discord-interaction:123456789012345678",
+        "operation" => "daily.claim",
+        "context" => %{"actor_user_id" => 123, "guild_id" => "234", "channel_id" => "345"},
+        "args" => %{}
+      })
 
     response = request(invalid)
     assert response.status == 400
     assert Jason.decode!(response.resp_body)["error"]["code"] == "INVALID_INPUT"
 
-    invalid_amount = Jason.encode!(%{
-      "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
-      "idempotency_key" => "discord-interaction:123456789012345678",
-      "operation" => "wallet.transfer",
-      "context" => %{"actor_user_id" => "123", "guild_id" => "234", "channel_id" => "345"},
-      "args" => %{"recipient_user_id" => "456", "amount" => "0"}
-    })
+    invalid_amount =
+      Jason.encode!(%{
+        "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
+        "idempotency_key" => "discord-interaction:123456789012345678",
+        "operation" => "wallet.transfer",
+        "context" => %{"actor_user_id" => "123", "guild_id" => "234", "channel_id" => "345"},
+        "args" => %{"recipient_user_id" => "456", "amount" => "0"}
+      })
+
     response = request(invalid_amount)
     assert response.status == 400
     assert Jason.decode!(response.resp_body)["error"]["code"] == "INVALID_AMOUNT"
@@ -113,18 +126,20 @@ defmodule ToriEconomy.ApiTest do
       if previous,
         do: System.put_env("TORI_ECONOMY_WRITE_ENABLED", previous),
         else: System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
+
       if previous_url,
         do: System.put_env("TORI_ECONOMY_DATABASE_URL", previous_url),
         else: System.delete_env("TORI_ECONOMY_DATABASE_URL")
     end)
 
-    valid = Jason.encode!(%{
-      "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
-      "idempotency_key" => "discord-interaction:123456789012345678",
-      "operation" => "daily.claim",
-      "context" => %{"actor_user_id" => "123", "guild_id" => "234", "channel_id" => "345"},
-      "args" => %{}
-    })
+    valid =
+      Jason.encode!(%{
+        "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
+        "idempotency_key" => "discord-interaction:123456789012345678",
+        "operation" => "daily.claim",
+        "context" => %{"actor_user_id" => "123", "guild_id" => "234", "channel_id" => "345"},
+        "args" => %{}
+      })
 
     response = request(valid)
     assert response.status == 403
@@ -138,17 +153,23 @@ defmodule ToriEconomy.ApiTest do
     System.put_env("TORI_ECONOMY_DATABASE_URL", "postgresql://localhost:5432/tori")
 
     on_exit(fn ->
-      if previous, do: System.put_env("TORI_ECONOMY_WRITE_ENABLED", previous), else: System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
-      if previous_url, do: System.put_env("TORI_ECONOMY_DATABASE_URL", previous_url), else: System.delete_env("TORI_ECONOMY_DATABASE_URL")
+      if previous,
+        do: System.put_env("TORI_ECONOMY_WRITE_ENABLED", previous),
+        else: System.delete_env("TORI_ECONOMY_WRITE_ENABLED")
+
+      if previous_url,
+        do: System.put_env("TORI_ECONOMY_DATABASE_URL", previous_url),
+        else: System.delete_env("TORI_ECONOMY_DATABASE_URL")
     end)
 
-    valid = Jason.encode!(%{
-      "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
-      "idempotency_key" => "discord-interaction:123456789012345678",
-      "operation" => "daily.claim",
-      "context" => %{"actor_user_id" => "123", "guild_id" => "234", "channel_id" => "345"},
-      "args" => %{}
-    })
+    valid =
+      Jason.encode!(%{
+        "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
+        "idempotency_key" => "discord-interaction:123456789012345678",
+        "operation" => "daily.claim",
+        "context" => %{"actor_user_id" => "123", "guild_id" => "234", "channel_id" => "345"},
+        "args" => %{}
+      })
 
     response = request(valid)
     assert response.status == 403
@@ -167,6 +188,7 @@ defmodule ToriEconomy.ApiTest do
       "TORI_ECONOMY_PRODUCTION_CUTOVER_ACK",
       "TORI_ECONOMY_PRODUCTION_WRITE_OPERATIONS"
     ]
+
     previous = Map.new(keys, &{&1, System.get_env(&1)})
 
     System.put_env("TORI_ECONOMY_WRITE_ENABLED", "true")
@@ -175,7 +197,12 @@ defmodule ToriEconomy.ApiTest do
     System.put_env("TORI_ECONOMY_DATABASE_HOST", "postgres")
     System.put_env("TORI_ECONOMY_DATABASE_NAME", "tori_main")
     System.put_env("TORI_ECONOMY_PRODUCTION_DATABASE_NAME", "tori_main")
-    System.put_env("TORI_ECONOMY_PRODUCTION_CUTOVER_ACK", "I_VERIFIED_BACKUP_RESTORE_SCHEMA_AND_EXCLUSIVE_WRITER_OWNERSHIP")
+
+    System.put_env(
+      "TORI_ECONOMY_PRODUCTION_CUTOVER_ACK",
+      "I_VERIFIED_BACKUP_RESTORE_SCHEMA_AND_EXCLUSIVE_WRITER_OWNERSHIP"
+    )
+
     System.put_env("TORI_ECONOMY_PRODUCTION_WRITE_OPERATIONS", "daily.claim")
 
     on_exit(fn ->
@@ -187,13 +214,15 @@ defmodule ToriEconomy.ApiTest do
 
     assert :ok = ToriEconomy.WriteGate.validate_startup!()
 
-    transfer = Jason.encode!(%{
-      "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
-      "idempotency_key" => "discord-interaction:123456789012345678",
-      "operation" => "wallet.transfer",
-      "context" => %{"actor_user_id" => "123", "guild_id" => "234", "channel_id" => "345"},
-      "args" => %{"recipient_user_id" => "456", "amount" => "1"}
-    })
+    transfer =
+      Jason.encode!(%{
+        "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
+        "idempotency_key" => "discord-interaction:123456789012345678",
+        "operation" => "wallet.transfer",
+        "context" => %{"actor_user_id" => "123", "guild_id" => "234", "channel_id" => "345"},
+        "args" => %{"recipient_user_id" => "456", "amount" => "1"}
+      })
+
     response = request(transfer)
     assert response.status == 403
     assert Jason.decode!(response.resp_body)["error"]["code"] == "READ_ONLY"

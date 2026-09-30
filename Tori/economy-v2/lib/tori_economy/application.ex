@@ -39,6 +39,7 @@ defmodule ToriEconomy.Application do
   defp api_children do
     :ok = ToriEconomy.WriteGate.validate_startup!()
     secret = System.fetch_env!("TORI_ECONOMY_API_SECRET")
+
     if byte_size(secret) < 32,
       do: raise("TORI_ECONOMY_API_SECRET must have at least 32 bytes")
 

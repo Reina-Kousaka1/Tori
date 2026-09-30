@@ -60,10 +60,11 @@ defmodule ToriEconomy.Discord.NostrumConsumer do
   end
 
   defp finish_interaction(interaction) do
-    result = case Adapter.handle_component(interaction) do
-      {:ok, content} -> {:ok, content}
-      :ignore -> Adapter.handle(interaction)
-    end
+    result =
+      case Adapter.handle_component(interaction) do
+        {:ok, content} -> {:ok, content}
+        :ignore -> Adapter.handle(interaction)
+      end
 
     case result do
       {:ok, content} -> edit_interaction(interaction, content)

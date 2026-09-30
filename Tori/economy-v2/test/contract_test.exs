@@ -27,13 +27,24 @@ defmodule ToriEconomy.ContractTest do
   end
 
   test "market reads require a safe product ID and bounded history" do
-    product = %{@base | "operation" => "market.product", "idempotency_key" => nil,
-                         "args" => %{"product_id" => "fishing_rod"}}
-    assert {:ok, _} = Contract.validate(product)
-    assert {:error, "INVALID_INPUT"} = Contract.validate(put_in(product, ["args", "product_id"], "bad/id"))
+    product = %{
+      @base
+      | "operation" => "market.product",
+        "idempotency_key" => nil,
+        "args" => %{"product_id" => "fishing_rod"}
+    }
 
-    history = %{product | "operation" => "market.history",
-                         "args" => %{"product_id" => "fishing_rod", "limit" => 100}}
+    assert {:ok, _} = Contract.validate(product)
+
+    assert {:error, "INVALID_INPUT"} =
+             Contract.validate(put_in(product, ["args", "product_id"], "bad/id"))
+
+    history = %{
+      product
+      | "operation" => "market.history",
+        "args" => %{"product_id" => "fishing_rod", "limit" => 100}
+    }
+
     assert {:ok, _} = Contract.validate(history)
     assert {:error, "INVALID_INPUT"} = Contract.validate(put_in(history, ["args", "limit"], 101))
   end
@@ -68,10 +79,13 @@ defmodule ToriEconomy.ContractTest do
     }
 
     assert {:ok, _} = Contract.validate(transfer)
-    assert {:error, "INVALID_AMOUNT"} = Contract.validate(put_in(transfer, ["args", "amount"], 50))
+
+    assert {:error, "INVALID_AMOUNT"} =
+             Contract.validate(put_in(transfer, ["args", "amount"], 50))
 
     assert {:error, "INVALID_AMOUNT"} =
              Contract.validate(put_in(transfer, ["args", "amount"], "9223372036854775808"))
+
     assert {:error, "INVALID_TARGET"} =
              Contract.validate(put_in(transfer, ["args", "recipient_user_id"], "not-a-snowflake"))
   end
@@ -88,12 +102,27 @@ defmodule ToriEconomy.ContractTest do
           {"shop.catalog", %{"category" => "tools"}},
           {"wallet.leaderboard", %{"limit" => 100}}
         ] do
-      request = @base |> Map.put("operation", operation) |> Map.put("args", args) |> Map.delete("idempotency_key")
+      request =
+        @base
+        |> Map.put("operation", operation)
+        |> Map.put("args", args)
+        |> Map.delete("idempotency_key")
+
       assert {:ok, _} = Contract.validate(request)
     end
 
-    invalid_limit = @base |> Map.put("operation", "wallet.leaderboard") |> Map.put("args", %{"limit" => 101}) |> Map.delete("idempotency_key")
-    invalid_category = @base |> Map.put("operation", "shop.catalog") |> Map.put("args", %{"category" => "Tools/All"}) |> Map.delete("idempotency_key")
+    invalid_limit =
+      @base
+      |> Map.put("operation", "wallet.leaderboard")
+      |> Map.put("args", %{"limit" => 101})
+      |> Map.delete("idempotency_key")
+
+    invalid_category =
+      @base
+      |> Map.put("operation", "shop.catalog")
+      |> Map.put("args", %{"category" => "Tools/All"})
+      |> Map.delete("idempotency_key")
+
     assert {:error, "INVALID_INPUT"} = Contract.validate(invalid_limit)
     assert {:error, "INVALID_INPUT"} = Contract.validate(invalid_category)
   end
@@ -107,6 +136,7 @@ defmodule ToriEconomy.ContractTest do
         |> Map.put("args", %{"category" => "dresses", "page" => 1000})
 
       assert {:ok, %{operation: ^operation}} = Contract.validate(request)
+
       assert {:error, "INVALID_INPUT"} =
                Contract.validate(put_in(request, ["args", "category"], "bad/category"))
 
@@ -116,9 +146,15 @@ defmodule ToriEconomy.ContractTest do
   end
 
   test "marketplace listing inspection is a read and validates only a stable listing ID" do
-    inspect = @base |> Map.put("operation", "marketplace.inspect")
-      |> Map.put("args", %{"listing_id" => "listing_123"}) |> Map.delete("idempotency_key")
+    inspect =
+      @base
+      |> Map.put("operation", "marketplace.inspect")
+      |> Map.put("args", %{"listing_id" => "listing_123"})
+      |> Map.delete("idempotency_key")
+
     assert {:ok, %{operation: "marketplace.inspect"}} = Contract.validate(inspect)
-    assert {:error, "INVALID_INPUT"} = Contract.validate(put_in(inspect, ["args", "listing_id"], "../private"))
+
+    assert {:error, "INVALID_INPUT"} =
+             Contract.validate(put_in(inspect, ["args", "listing_id"], "../private"))
   end
 end

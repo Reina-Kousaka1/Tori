@@ -15,8 +15,12 @@ defmodule ToriEconomy.Persona.Mood do
     celebration: {:chaotic, 0.55, 1_800_000, 1_800_000}
   }
 
-  defstruct mood: :normal, intensity: 0.0, started_at_ms: 0, expires_at_ms: nil,
-            reason: :initial, recent_events: %{}
+  defstruct mood: :normal,
+            intensity: 0.0,
+            started_at_ms: 0,
+            expires_at_ms: nil,
+            reason: :initial,
+            recent_events: %{}
 
   def start_link(opts) do
     name = Keyword.get(opts, :name, __MODULE__)
@@ -68,12 +72,18 @@ defmodule ToriEconomy.Persona.Mood do
         if is_integer(last_event_at) and now_ms - last_event_at < cooldown do
           state
         else
-        %__MODULE__{mood: mood, intensity: intensity, started_at_ms: now_ms,
-                    expires_at_ms: now_ms + duration, reason: event,
-                    recent_events: Map.put(state.recent_events, event, now_ms)}
+          %__MODULE__{
+            mood: mood,
+            intensity: intensity,
+            started_at_ms: now_ms,
+            expires_at_ms: now_ms + duration,
+            reason: event,
+            recent_events: Map.put(state.recent_events, event, now_ms)
+          }
         end
 
-      :error -> state
+      :error ->
+        state
     end
   end
 

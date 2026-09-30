@@ -18,7 +18,9 @@ defmodule ToriEconomy.Discord.PreviewGateway do
          :ok <- Application.put_env(:nostrum, :token, token),
          :ok <- Application.put_env(:nostrum, :gateway_intents, [:guilds]),
          {:ok, started_apps} <- Application.ensure_all_started(:nostrum) do
-      case NostrumConsumer.start_link() do
+      # The Nostrum 0.10 consumer macro provides start_link/1 with GenServer options.
+      # Naming this sole preview consumer also prevents accidental duplicate subscriptions.
+      case NostrumConsumer.start_link(name: NostrumConsumer) do
         {:ok, consumer} ->
           {:ok, %{started_apps: started_apps, consumer: consumer}}
 

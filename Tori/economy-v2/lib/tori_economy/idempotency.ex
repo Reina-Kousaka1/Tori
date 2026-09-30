@@ -5,11 +5,14 @@ defmodule ToriEconomy.Idempotency do
   def run(request, fun, opts \\ []) when is_function(fun, 0) do
     try do
       case Repo.transaction(fn -> run_in_transaction(request, fun, opts) end) do
-        {:ok, result} -> {:ok, Map.put(result, "request_id", request.request_id)}
+        {:ok, result} ->
+          {:ok, Map.put(result, "request_id", request.request_id)}
+
         {:error, {:unpersisted_result, result}} ->
           {:ok, Map.put(result, "request_id", request.request_id)}
 
-        {:error, _} -> {:error, "SERVICE_UNAVAILABLE"}
+        {:error, _} ->
+          {:error, "SERVICE_UNAVAILABLE"}
       end
     rescue
       _ -> {:error, "SERVICE_UNAVAILABLE"}

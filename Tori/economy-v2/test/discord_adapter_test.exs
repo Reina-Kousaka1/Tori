@@ -12,8 +12,13 @@ defmodule ToriEconomy.Discord.AdapterTest do
   end
 
   test "preview requires a guild and a real interaction identity" do
-    assert :ignore == Adapter.handle(%{data: %{name: "tori-profile-preview"}, id: 1,
-                                      guild_id: nil, channel_id: 2})
+    assert :ignore ==
+             Adapter.handle(%{
+               data: %{name: "tori-profile-preview"},
+               id: 1,
+               guild_id: nil,
+               channel_id: 2
+             })
   end
 
   test "only mutations receive a stable Discord interaction idempotency key" do
@@ -56,24 +61,52 @@ defmodule ToriEconomy.Discord.AdapterTest do
 
   test "read-only preview routes cover the new domain surfaces without claiming JDA commands" do
     commands = Adapter.preview_commands()
-    assert Enum.sort(commands) == Enum.sort([
-      "tori-profile-preview", "tori-shop-preview", "tori-wardrobe-preview",
-      "tori-marketplace-preview", "tori-career-preview", "tori-persona-preview",
-      "tori-consumable-preview", "tori-activity-preview"
-    ])
+
+    assert Enum.sort(commands) ==
+             Enum.sort([
+               "tori-profile-preview",
+               "tori-shop-preview",
+               "tori-wardrobe-preview",
+               "tori-marketplace-preview",
+               "tori-career-preview",
+               "tori-persona-preview",
+               "tori-consumable-preview",
+               "tori-activity-preview"
+             ])
+
     assert :ignore == Adapter.handle(%{data: %{name: "marketplace"}})
   end
 
   test "shop navigation reads the category/page and component IDs stay scoped to shop pages" do
-    command = %{data: %{name: "tori-shop-preview", options: [
-      %{name: "browse", options: [%{name: "category", value: "fashion"}, %{name: "page", value: 2}]}
-    ]}}
+    command = %{
+      data: %{
+        name: "tori-shop-preview",
+        options: [
+          %{
+            name: "browse",
+            options: [%{name: "category", value: "fashion"}, %{name: "page", value: 2}]
+          }
+        ]
+      }
+    }
+
     assert {:command, "fashion", 2} = Adapter.shop_navigation(command)
-    assert {:component, "fashion", 3} = Adapter.shop_navigation(%{data: %{custom_id: "tori-shop-page:fashion:3"}})
-    assert {:component, "beauty", 0} = Adapter.shop_navigation(%{data: %{custom_id: "tori-shop-category", values: ["beauty"]}})
+
+    assert {:component, "fashion", 3} =
+             Adapter.shop_navigation(%{data: %{custom_id: "tori-shop-page:fashion:3"}})
+
+    assert {:component, "beauty", 0} =
+             Adapter.shop_navigation(%{
+               data: %{custom_id: "tori-shop-category", values: ["beauty"]}
+             })
+
     assert :ignore = Adapter.shop_navigation(%{data: %{custom_id: "other:command:1"}})
     assert :ignore = Adapter.shop_navigation(%{data: %{custom_id: "tori-shop-page:fashion:9999"}})
-    assert :ignore = Adapter.shop_navigation(%{data: %{custom_id: "tori-shop-category", values: ["arbitrary"]}})
+
+    assert :ignore =
+             Adapter.shop_navigation(%{
+               data: %{custom_id: "tori-shop-category", values: ["arbitrary"]}
+             })
   end
 
   test "Nostrum acknowledges supported interactions before domain work" do
@@ -84,6 +117,41 @@ defmodule ToriEconomy.Discord.AdapterTest do
     assert Adapter.supported_interaction?(component)
     assert NostrumConsumer.acknowledgement(command) == %{type: 5, data: %{flags: 64}}
     assert NostrumConsumer.acknowledgement(component) == %{type: 6}
+  end
+
+  test "consumer uses Nostrum's supervised start_link/1 child contract" do
+    assert {NostrumConsumer, :start_link, [[]]} = NostrumConsumer.child_spec([]).start
+  end
+
+  test "consumable inspect and use results keep their distinct presentations" do
+    item = %{
+      "type" => "inventory_item",
+      "name" => "Training Tea",
+      "quantity" => 2,
+      "effect_active" => true,
+      "effect_code" => "focus",
+      "effect_duration_ms" => 120_000
+    }
+
+    assert {:ok, "Training Tea · quantity 2 · configured: focus · 2 min"} =
+             Adapter.render_result(:consumables, %{"status" => "ok", "result" => item}, nil)
+
+    used = %{
+      "type" => "consumable_used",
+      "item_name" => "Training Tea",
+      "effect_code" => "focus",
+      "expires_at_ms" => "1780000000000"
+    }
+
+    assert {:ok, "Used Training Tea · effect focus · expires <t:1780000000:R>."} =
+             Adapter.render_result(:consumables, %{"status" => "ok", "result" => used}, nil)
+
+    assert {:ok, "No active consumable effects."} =
+             Adapter.render_result(
+               :consumables,
+               %{"status" => "ok", "result" => %{"type" => "active_effects", "effects" => []}},
+               nil
+             )
   end
 
   test "shop preview exposes every category and keeps page controls on the active drop" do
@@ -103,15 +171,30 @@ defmodule ToriEconomy.Discord.AdapterTest do
     browse_command = Enum.find(shop_command["options"], &(&1["name"] == "browse"))
     category_option = Enum.find(browse_command["options"], &(&1["name"] == "category"))
     assert Enum.any?(category_option["choices"], &(&1["value"] == "all"))
+    page_option = Enum.find(browse_command["options"], &(&1["name"] == "page"))
+    assert page_option["type"] == 4
+    assert page_option["required"] == false
+    assert page_option["min_value"] == 0
+    assert page_option["max_value"] == 1000
   end
 
   test "Nostrum preview startup requires test mode and the exact connected test database" do
     assert PreviewCommands.safe_test_database?("test", "tori_economy_test", "tori_economy_test")
-    refute PreviewCommands.safe_test_database?("production", "tori_economy_test", "tori_economy_test")
+
+    refute PreviewCommands.safe_test_database?(
+             "production",
+             "tori_economy_test",
+             "tori_economy_test"
+           )
+
     refute PreviewCommands.safe_test_database?("test", "tori_main", "tori_main")
     refute PreviewCommands.safe_test_database?("test", "tori_economy_test", "tori_other_test")
-    assert PreviewCommands.configured_database(url: "postgresql://preview@127.0.0.1:5433/tori_preview_test") ==
-      "tori_preview_test"
+
+    assert PreviewCommands.configured_database(
+             url: "postgresql://preview@127.0.0.1:5433/tori_preview_test"
+           ) ==
+             "tori_preview_test"
+
     assert PreviewCommands.configured_database(database: "tori_named_test") == "tori_named_test"
   end
 end

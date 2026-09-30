@@ -94,10 +94,13 @@ defmodule ToriEconomy.Accounts do
     else
       [first, second] = Enum.sort([sender, recipient])
       created_accounts = Enum.filter([first, second], &ensure_account/1)
+
       balances =
         [first, second]
         |> Enum.map(fn user_id ->
-          case Sql.query!("SELECT balance FROM economy_accounts WHERE user_id = $1 FOR UPDATE", [user_id]).rows do
+          case Sql.query!("SELECT balance FROM economy_accounts WHERE user_id = $1 FOR UPDATE", [
+                 user_id
+               ]).rows do
             [[balance]] -> {user_id, balance}
             [] -> {user_id, 0}
           end
@@ -144,10 +147,11 @@ defmodule ToriEconomy.Accounts do
   end
 
   defp ensure_account(user_id) do
-    result = Sql.query!(
-      "INSERT INTO economy_accounts(user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING RETURNING user_id",
-      [user_id]
-    )
+    result =
+      Sql.query!(
+        "INSERT INTO economy_accounts(user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING RETURNING user_id",
+        [user_id]
+      )
 
     result.rows != []
   end

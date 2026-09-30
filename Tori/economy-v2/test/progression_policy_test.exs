@@ -18,8 +18,11 @@ defmodule ToriEconomy.Progression.PolicyTest do
     assert {:error, :invalid_xp} = Policy.level_for(-1, @thresholds)
     assert {:error, :invalid_thresholds} = Policy.level_for(0, [])
     assert {:error, :invalid_thresholds} = Policy.level_for(0, [%{level: 1, required_xp: 1}])
-    assert {:error, :invalid_thresholds} = Policy.level_for(0, [
-             %{level: 1, required_xp: 0}, %{level: 3, required_xp: 100}
-           ])
+
+    assert {:error, :invalid_thresholds} =
+             Policy.level_for(0, [
+               %{level: 1, required_xp: 0},
+               %{level: 3, required_xp: 100}
+             ])
   end
 end

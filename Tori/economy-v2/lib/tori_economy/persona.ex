@@ -46,12 +46,20 @@ defmodule ToriEconomy.Persona do
       neutral: "You reached level %{level}.",
       excited: "Level %{level} unlocked ✨"
     },
-    "marketplace.list.success" => %{neutral: "Listed %{item_name} ×%{quantity} for %{amount} Credits."},
-    "marketplace.cancel.success" => %{neutral: "The listing was cancelled and the item returned to your inventory."},
-    "consumable.use.success" => %{neutral: "Used %{item_name}. The configured effect is active until %{expires_at}."},
+    "marketplace.list.success" => %{
+      neutral: "Listed %{item_name} ×%{quantity} for %{amount} Credits."
+    },
+    "marketplace.cancel.success" => %{
+      neutral: "The listing was cancelled and the item returned to your inventory."
+    },
+    "consumable.use.success" => %{
+      neutral: "Used %{item_name}. The configured effect is active until %{expires_at}."
+    },
     "activity.fish.success" => %{neutral: "You caught %{item_name} and earned %{amount} Credits."},
     "activity.mine.success" => %{neutral: "You found %{item_name} and earned %{amount} Credits."},
-    "activity.chop.success" => %{neutral: "You gathered %{item_name} and earned %{amount} Credits."},
+    "activity.chop.success" => %{
+      neutral: "You gathered %{item_name} and earned %{amount} Credits."
+    },
     "profile.progress" => %{neutral: "Level %{level} · %{xp} XP"},
     "marketplace.purchase.success" => %{
       neutral: "Purchased %{item_name} from the marketplace for %{amount} Credits.",
@@ -81,8 +89,13 @@ defmodule ToriEconomy.Persona do
     date = Keyword.get(opts, :date, Date.utc_today())
     mood = Keyword.get_lazy(opts, :mood, &current_mood/0)
 
-    %{identity: :tori, context: context, mood: mood.mood,
-      intensity: mood.intensity, season: Season.current(date, Keyword.get(opts, :event))}
+    %{
+      identity: :tori,
+      context: context,
+      mood: mood.mood,
+      intensity: mood.intensity,
+      season: Season.current(date, Keyword.get(opts, :event))
+    }
   end
 
   defp current_mood do
