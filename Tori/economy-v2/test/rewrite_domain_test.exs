@@ -873,7 +873,7 @@ defmodule ToriEconomy.RewriteDomainTest do
       [user]
     )
 
-    assert [[900000]] =
+    assert [[900_000]] =
              Sql.query!("""
                SELECT duration_ms FROM economy_v2_consumable_effects
                WHERE item_id='berry_hydration_smoothie' AND active
