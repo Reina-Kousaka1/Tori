@@ -39,16 +39,32 @@ class CommandRegistrationTest {
             assertEquals(1, command.path("type").asInt());
             assertEquals(1, command.path("contexts").size());
             assertEquals(0, command.path("contexts").get(0).asInt(-1));
+            assertTrue(command.path("description_localizations").has("en-US"));
+            assertTrue(command.path("description_localizations").has("en-GB"));
             assertTrue(command.path("description_localizations").has("de"));
             assertTrue(command.path("description_localizations").has("nl"));
         }
         assertEquals(NAMES, names);
         JsonNode status = named(payload, "status");
-        assertEquals(Set.of("action", "texts", "interval_ms"), names(status.path("options")));
-        assertEquals(Set.of("start", "stop", "show"), values(named(status.path("options"), "action").path("choices")));
+        assertEquals(Set.of("action", "texts", "interval_ms", "activity", "special_event", "ttl_seconds"),
+            names(status.path("options")));
+        assertEquals(Set.of("start", "stop", "show", "activity"),
+            values(named(status.path("options"), "action").path("choices")));
+        assertEquals(Set.of("general", "school", "ballet", "volleyball", "cheer", "resting"),
+            values(named(status.path("options"), "activity").path("choices")));
         var interval = named(status.path("options"), "interval_ms");
         assertEquals(StatusRotation.MIN_INTERVAL_MS, interval.path("min_value").asLong());
         assertEquals(StatusRotation.MAX_INTERVAL_MS, interval.path("max_value").asLong());
+        assertEquals(64, named(status.path("options"), "special_event").path("max_length").asInt());
+        var ttl = named(status.path("options"), "ttl_seconds");
+        assertEquals(60, ttl.path("min_value").asLong());
+        assertEquals(604800, ttl.path("max_value").asLong());
+        for (String locale : List.of("en-US", "en-GB", "de", "nl")) {
+            assertTrue(status.path("description_localizations").has(locale), "Missing /status locale " + locale);
+            for (String option : List.of("action", "texts", "interval_ms", "activity", "special_event", "ttl_seconds"))
+                assertTrue(named(status.path("options"), option).path("description_localizations").has(locale),
+                    "Missing /status " + option + " locale " + locale);
+        }
         assertEquals(Permission.BAN_MEMBERS.getRawValue(), named(payload, "ban").path("default_member_permissions").asLong());
         assertEquals(Permission.MESSAGE_MANAGE.getRawValue(), named(payload, "purge").path("default_member_permissions").asLong());
         assertTrue(named(payload, "ping").path("default_member_permissions").isNull()

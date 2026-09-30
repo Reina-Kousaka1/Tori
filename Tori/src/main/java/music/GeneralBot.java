@@ -766,20 +766,12 @@ public final class GeneralBot extends CommandListener {
     }
 
     private static String presenceProviderUnavailable(Language language) {
-        return switch (language) {
-            case DE -> "Toris Presence-Dienst ist nicht erreichbar. Der lokale Fallback bleibt aktiv.";
-            case NL -> "Tori's presence-service is niet bereikbaar. De lokale fallback blijft actief.";
-            case EN -> "Tori's presence service is unavailable. The local fallback remains active.";
-        };
+        return Messages.text(language, "status.presence.unavailable");
     }
 
     private static String presenceContextUpdated(Language language, String activity, String event) {
         String details = event == null || event.isBlank() ? activity : activity + " · " + event;
-        return switch (language) {
-            case DE -> "Toris globaler Activity-Kontext wurde aktualisiert: " + details + ".";
-            case NL -> "Tori's globale activiteitscontext is bijgewerkt: " + details + ".";
-            case EN -> "Tori's global activity context was updated: " + details + ".";
-        };
+        return Messages.text(language, "status.presence.updated", details);
     }
     public static String help(Language language) {
         var embed = helpEmbed(language);
