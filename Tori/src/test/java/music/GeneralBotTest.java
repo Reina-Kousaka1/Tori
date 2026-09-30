@@ -305,6 +305,14 @@ class GeneralBotTest {
         }
     }
 
+    @Test void presenceV2LeavesMusicAndVoiceCommandOwnershipWithTheMusicListener() throws Exception {
+        try (var bot = bot(new StatusRotation())) {
+            assertTrue(bot.accepts("status"));
+            for (String command : List.of("play", "pause", "resume", "skip", "leave", "queue", "volume"))
+                assertFalse(bot.accepts(command), "Presence listener claimed /" + command);
+        }
+    }
+
     @Test void activityControlFallsBackCleanlyWhenElixirIsNotConfigured() throws Exception {
         var fixture = new Fixture();
         var timer = new StatusRotationTest.FakeScheduler();
