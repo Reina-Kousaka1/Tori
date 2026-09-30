@@ -4,7 +4,7 @@ defmodule ToriEconomy.Persona.PresenceTest do
 
   test "global activity is transient, versioned state with optional expiry" do
     {:ok, server} = Presence.start_link(name: nil, now_ms: 1_000)
-    on_exit(fn -> GenServer.stop(server) end)
+    on_exit(fn -> stop_server(server) end)
 
     assert %{activity: "general", revision: 0, special_event: nil} =
              Presence.snapshot(server, 1_000)
@@ -25,7 +25,7 @@ defmodule ToriEconomy.Persona.PresenceTest do
 
   test "unknown activities and invalid events or lifetimes are rejected" do
     {:ok, server} = Presence.start_link(name: nil, now_ms: 1_000)
-    on_exit(fn -> GenServer.stop(server) end)
+    on_exit(fn -> stop_server(server) end)
 
     assert {:error, :invalid} = Presence.set_context("individual_user_career", server: server)
     assert {:error, :invalid} = Presence.set_context("cheer", server: server,
@@ -37,10 +37,21 @@ defmodule ToriEconomy.Persona.PresenceTest do
 
   test "a context without ttl remains active" do
     {:ok, server} = Presence.start_link(name: nil, now_ms: 1_000)
-    on_exit(fn -> GenServer.stop(server) end)
+    on_exit(fn -> stop_server(server) end)
 
     assert {:ok, %{activity: "school", expires_at_ms: nil}} =
              Presence.set_context("school", server: server, now_ms: 2_000)
     assert Presence.snapshot(server, 100_000).activity == "school"
+  end
+  defp stop_server(server) do
+    try do
+      if Process.alive?(server) do
+        GenServer.stop(server)
+      else
+        :ok
+      end
+    catch
+      :exit, _reason -> :ok
+    end
   end
 end
