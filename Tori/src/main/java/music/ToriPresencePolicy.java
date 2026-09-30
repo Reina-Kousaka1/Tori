@@ -17,15 +17,6 @@ final class ToriPresencePolicy {
     static List<Template> candidates(ToriPresenceContext context) {
         Objects.requireNonNull(context);
         List<Template> eventChoices = specialEvent(context.specialEvent());
-        if (eventChoices == null) {
-            String seasonalEvent = switch (context.season()) {
-                case HALLOWEEN -> "halloween";
-                case CHRISTMAS -> "christmas";
-                case VALENTINE -> "valentine";
-                default -> null;
-            };
-            eventChoices = specialEvent(seasonalEvent);
-        }
         if (eventChoices != null) return eventChoices;
 
         var result = new ArrayList<>(base(context.activity()));
@@ -140,24 +131,36 @@ final class ToriPresencePolicy {
                                   ToriPresenceContext.Season season) {
         String text = switch (activity) {
             case BALLET -> switch (season) {
+                case HALLOWEEN -> "Spooky season at ballet 🎀🎃";
+                case CHRISTMAS -> "Holiday rehearsal 🎀🎄";
+                case VALENTINE -> "Valentine recital prep 🎀💌";
                 case WINTER -> "Bundled up for ballet rehearsal 🎀❄️";
                 case SPRING -> "Spring recital prep 🌷🎀";
                 case AUTUMN -> "Rehearsal in the autumn chill 🎀🍂";
                 default -> null;
             };
             case VOLLEYBALL -> switch (season) {
+                case HALLOWEEN -> "Spooky season match 🏐🎃";
+                case CHRISTMAS -> "Christmas tournament practice 🎄🏐";
+                case VALENTINE -> "Serving up a Valentine's win 🏐💌";
                 case SUMMER -> "Summer serves after school 🏐☀️";
                 case WINTER -> "Indoor practice, winter edition 🏐❄️";
                 case AUTUMN -> "Autumn games are here 🏐🍂";
                 default -> null;
             };
             case CHEER -> switch (season) {
+                case HALLOWEEN -> "Halloween routine prep 🎃";
+                case CHRISTMAS -> "Holiday routine, same energy ✨🎄";
+                case VALENTINE -> "Valentine competition prep 💌🎀";
                 case SPRING -> "Spring competition prep 🌷";
                 case AUTUMN -> "Cheer prep in crisp fall air 🍂";
                 case WINTER -> "Winter routine, same energy ✨";
                 default -> null;
             };
             case RESTING, GENERAL, SCHOOL -> switch (season) {
+                case HALLOWEEN -> "Taking a spooky season break 🎃";
+                case CHRISTMAS -> "Taking a little holiday break 🎄";
+                case VALENTINE -> "Enjoying a little Valentine sparkle 💌";
                 case SPRING -> "Taking a break in the spring sunshine 🌷";
                 case SUMMER -> "Enjoying a little summer break ☀️";
                 case AUTUMN -> "Getting cozy this autumn 🍂";

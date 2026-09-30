@@ -64,12 +64,15 @@ class ToriPresencePolicyTest {
             ToriPresencePolicy.resolve(context, 4, bound -> 0, null).getName());
     }
 
-    @Test void eventSeasonValuesAlsoUseTheHighPriorityEventTemplates() {
+    @Test void eventSeasonModifiesTheCurrentActivityWhenNoSpecialEventIsSet() {
         var christmas = new ToriPresenceContext(ToriPresenceContext.Activity.VOLLEYBALL,
-            ToriPresenceContext.Mood.SLEEPY, ToriPresenceContext.Season.CHRISTMAS,
-            null, 0.8, 5, null, null);
-        assertEquals(List.of("Making a Christmas wish list ✨🎄",
-            "Holiday break after practice 🎄"), ToriPresencePolicy.candidateTexts(christmas));
+            ToriPresenceContext.Mood.NORMAL, ToriPresenceContext.Season.CHRISTMAS,
+            null, 0, 5, null, null);
+        var choices = ToriPresencePolicy.candidateTexts(christmas);
+        assertTrue(choices.contains("Christmas tournament practice 🎄🏐"));
+        assertTrue(choices.stream().noneMatch(text -> text.contains("ballet")));
+        assertEquals("Christmas tournament practice 🎄🏐 | (2)",
+            ToriPresencePolicy.resolve(christmas, 2, bound -> bound - 1, null).getName());
     }
 
     @Test void futureUnknownValuesDegradeToGeneralSafeDefaults() throws Exception {
