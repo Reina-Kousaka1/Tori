@@ -1,5 +1,5 @@
 defmodule ToriEconomy.Discord.PreviewCommands do
-  @moduledoc "Registers only the uniquely named preview commands in one explicit test guild."
+  @moduledoc "Registers preview commands only in the explicitly configured test guild."
   use GenServer
   alias ToriEconomy.Discord.Adapter
 
@@ -7,7 +7,12 @@ defmodule ToriEconomy.Discord.PreviewCommands do
 
   def definitions do
     [
-      command("tori-profile-preview", "Preview your persisted Tori profile."),
+      command("profile", "View a Tori economy and career profile.", [
+        user_option("user", "Profile to view; defaults to you.", false)
+      ]),
+      command("tori-profile-preview", "Preview your persisted Tori profile.", [
+        user_option("user", "Profile to view; defaults to you.", false)
+      ]),
       command("tori-persona-preview", "Preview Tori's current mood and season."),
       command("tori-shop-preview", "Browse and purchase from the test-gated shop preview.", [
         sub("browse", "Browse the current persisted drop.", [
@@ -62,15 +67,8 @@ defmodule ToriEconomy.Discord.PreviewCommands do
           string("listing_id", "Listing ID", true)
         ])
       ]),
-      command("tori-career-preview", "View or progress a persisted career.", [
-        sub("status", "View career levels and current selection."),
-        sub("select", "Select or switch your career.", [
-          string("career_code", "Career", true, careers())
-        ]),
-        sub("practice", "Complete one cooldown-controlled practice action.", [
-          string("career_code", "Selected career", true, careers())
-        ])
-      ]),
+      command("career", "View careers, select one, or complete an activity.", career_options()),
+      command("tori-career-preview", "View or progress a persisted career.", career_options()),
       command("tori-consumable-preview", "Use a configured owned consumable.", [
         sub("effects", "View your current active effects."),
         sub("inspect", "Inspect a consumable and its configured effect.", [
@@ -195,6 +193,42 @@ defmodule ToriEconomy.Discord.PreviewCommands do
 
   defp sub(name, description, options \\ []),
     do: %{"name" => name, "description" => description, "type" => 1, "options" => options}
+
+  defp career_options do
+    [
+      sub("status", "View career levels, progress and activities."),
+      sub("select", "Select or switch your career.", [
+        string("career_code", "Career", true, careers())
+      ]),
+      sub("activity", "Complete a cooldown-controlled career activity.", [
+        string("career_code", "Your selected career", true, careers()),
+        string("action_code", "Activity", true, career_activities())
+      ]),
+      sub("practice", "Legacy alias for your starter career practice.", [
+        string("career_code", "Your selected career", true, careers())
+      ])
+    ]
+  end
+
+  defp career_activities,
+    do:
+      choices([
+        {"Ballet class", "class"},
+        {"Barre work", "barre"},
+        {"Ballet rehearsal", "rehearsal"},
+        {"Ballet performance", "performance"},
+        {"Court practice", "court_practice"},
+        {"Volleyball drills", "drills"},
+        {"Scrimmage", "scrimmage"},
+        {"Match", "match"},
+        {"Cheer practice", "squad_practice"},
+        {"Tumbling and stunts", "tumbling_stunts"},
+        {"Routine work", "routine"},
+        {"Competition", "competition"}
+      ])
+
+  defp user_option(name, description, required),
+    do: %{"name" => name, "description" => description, "type" => 6, "required" => required}
 
   defp string(name, description, required, choices \\ nil) do
     option = %{"name" => name, "description" => description, "type" => 3, "required" => required}

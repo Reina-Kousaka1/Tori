@@ -32,13 +32,14 @@ An optional Nostrum preview is available for a **separate test bot only**.
 It is disabled unless `TORI_NOSTRUM_ENABLED=true`,
 `TORI_NOSTRUM_PREVIEW_ONLY=true`, a dedicated test application/guild/token,
 `TORI_ECONOMY_WRITE_MODE=test`, and an explicit isolated `*_test` database are
-configured. Test writes also require `TORI_ECONOMY_WRITE_ENABLED=true`. It registers only
-uniquely named `tori-*-preview` commands and supports shop category/page
+configured. Test writes also require `TORI_ECONOMY_WRITE_ENABLED=true`. In that
+explicit preview guild it registers `/profile` and `/career` plus uniquely
+named `tori-*-preview` helper commands. It supports shop category/page
 navigation, item details and test-gated purchases, profile, wardrobe,
 marketplace, careers, consumables, gathering activities and Persona previews.
 Interactions are acknowledged before domain work and edited ephemerally. It
-does not register or take ownership of Java/JDA commands. Never enable it with
-Tori's production bot token.
+does not register commands on Tori's production JDA bot or change production
+command ownership. Never enable it with Tori's production bot token.
 
 Routing can be set centrally, for example:
 
@@ -64,6 +65,39 @@ views through the same private API. Neither operation creates a quote, evolves
 a price, changes stock, or authorizes an Elixir Market writer. Java Market
 commands are not routed to these operations yet.
 
+## Career Gameplay V1 and Profile V1
+
+Career Gameplay V1 uses the existing career selection, per-career XP, XP source,
+request-idempotency, wallet, ledger, inventory, equipment and cooldown tables.
+It configures four activities for each supported career: Ballet class, barre,
+rehearsal and performance; Volleyball practice, drills, scrimmage and match;
+Cheer practice, tumbling/stunts, routine and competition. Every activity uses
+the same progression engine. Career XP also advances the existing account XP
+counter. Base rewards are bounded by the configured action: 10–22 Credits and
+16–30 XP, with a 30-minute, one-hour or four-hour cooldown. A single correctly
+equipped V11 item from that career's category grants a flat +2 XP and +5 Credits
+per action; the bonus does not stack. Rehearsal, scrimmage and routine require
+career level 3 plus the matching V11 outfit item; performance, match and
+competition require level 4 plus matching V11 gear.
+
+V12 only adds action reward and requirement columns and seeds those action
+definitions. It does not rewrite wallet, inventory, selections, progress or
+historical XP. No new gameplay table or separate skill counter is introduced.
+The profile's account Level comes from account XP; Career Level comes from the
+selected career's XP; Skill Level is a derived summary of XP across all active
+careers using the existing shared thresholds. Thus Skill Level adds no second
+persisted progression state. `/profile [user]` is a read-only aggregate of
+Credits, account XP/Level, derived Skill Level, selected Career XP/Level,
+equipped outfit and selected style. Relationship/Marriage is omitted until a
+real domain exists. Individual career actions do not record global Persona mood
+events or change Tori's global Presence context.
+
+The `/profile` and `/career` Discord interactions are implemented through
+Nostrum/Elixir for the isolated preview bot and guild described above. No Java
+business logic or production JDA command registration is added; production
+routing and write gates remain unchanged. Career writes remain unavailable in
+production under the existing allowlist.
+
 ## Writes and ownership
 
 Elixir mutations return HTTP 403 `READ_ONLY` by default because the Compose
@@ -85,11 +119,11 @@ area have been transferred or disabled under a reviewed ownership plan.
 Mutation requests use the Discord interaction ID as a persistent idempotency
 key. Daily and transfer balance updates, ledger entries, and stored results
 share one PostgreSQL transaction. The current test harness applies the
-repository's additive V1–V10 Flyway SQL to an empty isolated test database; it
-does not apply migrations to production. V5 reuses `economy_accounts`; V6–V10
-add catalog, rotation, loadout, progression, marketplace, activity and
-consumable structures without resetting existing data. Do not deploy a bot
-image that auto-applies pending migrations until the backup/restore and schema
+repository's additive V1–V12 Flyway SQL to an empty isolated test database; it
+does not apply migrations to production. V5 reuses `economy_accounts`; V6–V12
+add catalog, rotation, loadout, progression, marketplace, activity, consumable
+and career-action configuration without resetting existing player data. Do not
+deploy a bot image that auto-applies pending migrations until the backup/restore and schema
 review gates in the Pi guide have been completed.
 
 ## Build, test, and deployment
@@ -99,9 +133,10 @@ review gates in the Pi guide have been completed.
 - Isolated PostgreSQL tests require `TORI_ECONOMY_TEST_DATABASE_URL` to point
   to a dedicated database ending in `_test`. Under `MIX_ENV=test`, the
   application starts its Repo from this URL and ignores production database
-  settings. `mix test` applies Tori's V1–V10 Flyway SQL files to a fresh, empty
+  settings. `mix test` applies Tori's V1–V12 Flyway SQL files to a fresh, empty
   test schema before running the integration tests; an incomplete nonempty
-  schema fails verification instead of being silently modified. The target
+  schema fails verification instead of being silently modified. An older
+  isolated schema with V1–V11 can receive the additive V12 action config. The target
   URL, supervised Repo configuration and connected database name are checked
   before any schema write. Without the test URL, database integration tests
   are skipped. Never use production credentials or data for these tests.
@@ -116,7 +151,7 @@ route. See the [Raspberry Pi deployment and cutover guide](../docs/ECONOMY-API-P
 The rewrite's full integration suite, Discord preview and Docker release
 configuration have not been verified on this workstation. No production
 migration or write was run. Keep routes `LEGACY` and write mode `disabled`
-until the operator completes backup/restore, V1–V10 schema review and
+until the operator completes backup/restore, V1–V12 schema review and
 writer-ownership checks in the Pi guide.
 
 See `../docs/ECONOMY-V2-READINESS.md` for the parity, backup/restore, and

@@ -1,6 +1,7 @@
 defmodule ToriEconomy.Discord.AdapterTest do
   use ExUnit.Case, async: true
   alias ToriEconomy.Contract
+  alias ToriEconomy.Dispatcher
   alias ToriEconomy.Discord.Adapter
   alias ToriEconomy.Discord.NostrumConsumer
   alias ToriEconomy.Discord.PreviewCommands
@@ -64,6 +65,8 @@ defmodule ToriEconomy.Discord.AdapterTest do
 
     assert Enum.sort(commands) ==
              Enum.sort([
+               "profile",
+               "career",
                "tori-profile-preview",
                "tori-shop-preview",
                "tori-wardrobe-preview",
@@ -75,6 +78,86 @@ defmodule ToriEconomy.Discord.AdapterTest do
              ])
 
     assert :ignore == Adapter.handle(%{data: %{name: "marketplace"}})
+  end
+
+  test "career and profile are Nostrum-only previews with complete command options" do
+    profile = Enum.find(PreviewCommands.definitions(), &(&1["name"] == "profile"))
+    assert [%{"name" => "user", "type" => 6, "required" => false}] = profile["options"]
+
+    career = Enum.find(PreviewCommands.definitions(), &(&1["name"] == "career"))
+    assert [%{"name" => "status"}, %{"name" => "select"}, activity, %{"name" => "practice"}] =
+             career["options"]
+
+    action = Enum.find(activity["options"], &(&1["name"] == "action_code"))
+    values = Enum.map(action["choices"], & &1["value"])
+    assert Enum.uniq(values) == values
+
+    assert Enum.sort(values) ==
+             Enum.sort(~w(
+               class barre rehearsal performance court_practice drills scrimmage match
+               squad_practice tumbling_stunts routine competition
+             ))
+
+    assert Dispatcher.mood_event_for_result(%{
+             "type" => "career_practice",
+             "level_up" => true,
+             "rare_drop" => true
+           }) == nil
+  end
+
+  test "career activity responses show bounded XP and Credits rewards" do
+    response = %{
+      "status" => "ok",
+      "result" => %{
+        "type" => "career_practice",
+        "career_name" => "Ballet",
+        "action_code" => "barre",
+        "xp_awarded" => "20",
+        "credits_awarded" => "14",
+        "career_level" => 2
+      },
+      "presentation" => %{"text" => "Nice work at the barre."}
+    }
+
+    assert {:ok, content} = Adapter.render_result(:career, response, "123")
+    assert content =~ "Nice work at the barre."
+    assert content =~ "Ballet barre · +20 XP · +14 Credits · career level 2"
+  end
+
+  test "career overview uses selected career action availability" do
+    response = %{
+      "status" => "ok",
+      "result" => %{
+        "type" => "career_snapshot",
+        "careers" => [
+          %{"code" => "ballet", "name" => "Ballet", "level" => 2, "xp" => "120"}
+        ],
+        "active_career" => %{
+          "code" => "ballet",
+          "name" => "Ballet",
+          "level" => 2,
+          "xp" => "120",
+          "actions" => [
+            %{
+              "action_code" => "rehearsal",
+              "display_name" => "Rehearsal",
+              "reward_xp" => "24",
+              "reward_credits" => "18",
+              "required_career_level" => 3,
+              "required_item_id" => "rehearsal_wrap_skirt",
+              "required_item_name" => "Rehearsal Wrap Skirt",
+              "cooldown_remaining_ms" => 0,
+              "availability" => "career_level"
+            }
+          ]
+        }
+      }
+    }
+
+    assert {:ok, content} = Adapter.render_result(:career, response, "123")
+    assert content =~ "Activities:"
+    assert content =~ "Rehearsal"
+    assert content =~ "requires career level 3"
   end
 
   test "shop navigation reads the category/page and component IDs stay scoped to shop pages" do

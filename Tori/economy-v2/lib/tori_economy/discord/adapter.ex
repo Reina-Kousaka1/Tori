@@ -3,6 +3,8 @@ defmodule ToriEconomy.Discord.Adapter do
   alias ToriEconomy.{Contract, Dispatcher, Persona, WriteGate}
 
   @commands %{
+    "profile" => :profile,
+    "career" => :career,
     "tori-profile-preview" => :profile,
     "tori-shop-preview" => :shop,
     "tori-wardrobe-preview" => :wardrobe,
@@ -137,11 +139,7 @@ defmodule ToriEconomy.Discord.Adapter do
              "request_id" => Ecto.UUID.generate(),
              "idempotency_key" => key,
              "operation" => operation,
-             "context" => %{
-               "actor_user_id" => user,
-               "guild_id" => Integer.to_string(guild),
-               "channel_id" => Integer.to_string(channel)
-             },
+             "context" => preview_context(preview, options, user, guild, channel),
              "args" => args
            }),
          :ok <- if(operation in @mutations, do: WriteGate.authorize(operation), else: :ok),
@@ -238,6 +236,14 @@ defmodule ToriEconomy.Discord.Adapter do
   defp operation_for(:career, "select", options),
     do: {:ok, "career.select", %{"career_code" => value(options, "career_code")}}
 
+  defp operation_for(:career, "activity", options),
+    do:
+      {:ok, "career.practice",
+       %{
+         "career_code" => value(options, "career_code"),
+         "action_code" => value(options, "action_code")
+       }}
+
   defp operation_for(:career, "practice", options),
     do:
       {:ok, "career.practice",
@@ -279,6 +285,12 @@ defmodule ToriEconomy.Discord.Adapter do
   defp render_preview(:consumables, _response, %{"type" => "active_effects"} = result, _user),
     do: format_effects(result)
 
+  defp render_preview(:career, response, %{"type" => "career_practice"} = result, _user) do
+    message = get_in(response, ["presentation", "text"]) || "Career activity complete."
+
+    "#{message}\n#{result["career_name"]} #{String.replace(result["action_code"], "_", " ")} · +#{result["xp_awarded"]} XP · +#{result["credits_awarded"]} Credits · career level #{result["career_level"]}."
+  end
+
   defp render_preview(:marketplace, response, %{"type" => "marketplace_listing"} = result, _user),
     do: "#{get_in(response, ["presentation", "text"])} Listing ID: `#{result["listing_id"]}`."
 
@@ -307,10 +319,19 @@ defmodule ToriEconomy.Discord.Adapter do
 
     case options do
       [first | _] ->
-        {field(first, :name, nil),
-         Map.new(field(first, :options, []), fn option ->
-           {field(option, :name, ""), field(option, :value, nil)}
-         end)}
+        case field(first, :options, nil) do
+          nested when is_list(nested) ->
+            {field(first, :name, nil),
+             Map.new(nested, fn option ->
+               {field(option, :name, ""), field(option, :value, nil)}
+             end)}
+
+          _ ->
+            {nil,
+             Map.new(options, fn option ->
+               {field(option, :name, ""), field(option, :value, nil)}
+             end)}
+        end
 
       _ ->
         {nil, %{}}
@@ -341,6 +362,32 @@ defmodule ToriEconomy.Discord.Adapter do
     end
   end
 
+  defp preview_context(preview, options, user, guild, channel) do
+    context = %{
+      "actor_user_id" => user,
+      "guild_id" => Integer.to_string(guild),
+      "channel_id" => Integer.to_string(channel)
+    }
+
+    if preview == :profile do
+      case Map.fetch(options, "user") do
+        {:ok, target} when is_integer(target) ->
+          Map.put(context, "target_user_id", Integer.to_string(target))
+
+        {:ok, target} when is_binary(target) ->
+          Map.put(context, "target_user_id", target)
+
+        {:ok, _invalid_target} ->
+          Map.put(context, "target_user_id", "invalid")
+
+        :error ->
+          context
+      end
+    else
+      context
+    end
+  end
+
   defp field(map, key, fallback) when is_map(map) do
     case Map.fetch(map, key) do
       {:ok, value} -> value
@@ -359,6 +406,7 @@ defmodule ToriEconomy.Discord.Adapter do
         else: "XP #{progress["xp"]} · max configured level"
 
     career = progress["active_career"]
+    profile_user = result["user_id"] || user
     outfit = Enum.map(result["loadout"] || [], fn item -> "#{item["slot"]}: #{item["name"]}" end)
 
     cosmetics =
@@ -374,11 +422,12 @@ defmodule ToriEconomy.Discord.Adapter do
       end)
 
     [
-      "Tori profile • <@#{user}>",
-      "Balance: #{result["balance"]} Credits",
+      "Tori profile • <@#{profile_user}>",
+      "Credits: #{result["balance"]}",
       "Level #{progress["level"] || 1} • #{xp_progress}",
+      "Skill level #{progress["skill_level"] || 1} • #{progress["skill_xp"] || "0"} career XP",
       if(career,
-        do: "Career: #{career["name"]} • level #{career["level"]}",
+        do: "Career: #{career["name"]} • level #{career["level"]} · #{career["xp"]} XP",
         else: "Career: none selected"
       ),
       if(outfit == [], do: "Outfit: empty", else: "Outfit: " <> Enum.join(outfit, " · ")),
@@ -492,10 +541,41 @@ defmodule ToriEconomy.Discord.Adapter do
         "• #{entry["name"]}: level #{entry["level"]}, #{entry["xp"]} XP#{marker}"
       end)
 
+    activities =
+      case career do
+        %{"actions" => actions} ->
+          Enum.map(actions, fn action ->
+            status =
+              case action["availability"] do
+                "career_level" ->
+                  "requires career level #{action["required_career_level"]}"
+
+                "equipment" ->
+                  "equip #{action["required_item_name"] || action["required_item_id"]}"
+
+                "cooldown" ->
+                  "cooldown #{max(1, div(action["cooldown_remaining_ms"], 60_000))} min"
+
+                "select_career" ->
+                  "select this career"
+
+                _ ->
+                  "ready"
+              end
+
+            "• #{action["display_name"]}: +#{action["reward_xp"]} XP / +#{action["reward_credits"]} Credits · #{status}"
+          end)
+
+        _ ->
+          []
+      end
+
     [
       if(career, do: "Current career: #{career["name"]}", else: "Choose a career to get started."),
-      Enum.join(options, "\n")
+      Enum.join(options, "\n"),
+      if(activities == [], do: nil, else: "Activities:\n" <> Enum.join(activities, "\n"))
     ]
+    |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
     |> clip()
   end
@@ -582,7 +662,7 @@ defmodule ToriEconomy.Discord.Adapter do
   defp error_text("INSUFFICIENT_FUNDS"), do: "You do not have enough Credits."
 
   defp error_text("REQUIREMENT_NOT_MET"),
-    do: "You have not met the level or career requirement yet."
+    do: "Choose the matching career, meet its level requirement, and equip the required item."
 
   defp error_text(_), do: "The request could not be completed."
   defp rarity_mark("special"), do: "✦"
