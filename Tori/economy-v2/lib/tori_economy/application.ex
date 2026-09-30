@@ -29,10 +29,10 @@ defmodule ToriEconomy.Application do
         end
 
         Application.put_env(:tori_economy, ToriEconomy.Repo, url: url, pool_size: 10)
-        [ToriEconomy.Repo, ToriEconomy.Persona.Mood]
+        [ToriEconomy.Repo, ToriEconomy.Persona.Mood, ToriEconomy.Persona.Presence]
 
       _ ->
-        [ToriEconomy.Persona.Mood]
+        [ToriEconomy.Persona.Mood, ToriEconomy.Persona.Presence]
     end
   end
 
@@ -61,6 +61,7 @@ defmodule ToriEconomy.Application do
     [
       ToriEconomy.Repo,
       ToriEconomy.Persona.Mood,
+      ToriEconomy.Persona.Presence,
       {Bandit, plug: ToriEconomy.Api, ip: ip, port: port}
     ] ++ discord_children
   end

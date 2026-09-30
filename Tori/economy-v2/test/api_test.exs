@@ -5,6 +5,7 @@ defmodule ToriEconomy.ApiTest do
 
   alias ToriEconomy.Api
   alias ToriEconomy.Persona.Mood
+  alias ToriEconomy.Persona.Presence
 
   setup do
     previous = System.get_env("TORI_ECONOMY_API_SECRET")
@@ -55,6 +56,61 @@ defmodule ToriEconomy.ApiTest do
 
     assert invalid.status == 400
     assert Mood.snapshot().mood == :competitive
+  end
+
+  test "versioned Tori context exposes semantics and accepts only global activity updates" do
+    Presence.reset()
+    on_exit(fn -> Presence.reset() end)
+
+    anonymous = conn(:get, "/internal/persona/v2/context") |> Api.call([])
+    assert anonymous.status == 401
+
+    read_context = fn ->
+      conn(:get, "/internal/persona/v2/context")
+      |> put_req_header("authorization", "Bearer " <> String.duplicate("s", 32))
+      |> Api.call([])
+    end
+
+    initial = Jason.decode!(read_context.().resp_body)
+    assert initial["schema_version"] == 2
+    assert initial["activity"] == "general"
+    assert initial["season"] in ["spring", "summer", "autumn", "winter"]
+    refute Map.has_key?(initial, "suggestion")
+
+    update =
+      conn(
+        :post,
+        "/internal/persona/v2/context",
+        Jason.encode!(%{
+          "schema_version" => 2,
+          "activity" => "ballet",
+          "special_event" => "recital",
+          "ttl_seconds" => 60
+        })
+      )
+      |> put_req_header("authorization", "Bearer " <> String.duplicate("s", 32))
+      |> put_req_header("content-type", "application/json")
+      |> Api.call([])
+
+    assert update.status == 200
+    updated = Jason.decode!(update.resp_body)
+    assert updated["activity"] == "ballet"
+    assert updated["special_event"] == "recital"
+    assert is_binary(updated["updated_at"])
+    assert updated["expires_at"] != nil
+
+    invalid =
+      conn(
+        :post,
+        "/internal/persona/v2/context",
+        Jason.encode!(%{"schema_version" => 2, "activity" => "user_career"})
+      )
+      |> put_req_header("authorization", "Bearer " <> String.duplicate("s", 32))
+      |> put_req_header("content-type", "application/json")
+      |> Api.call([])
+
+    assert invalid.status == 400
+    assert Presence.snapshot().activity == "ballet"
   end
 
   test "private persona rendering uses structured values and keeps serious copy neutral" do

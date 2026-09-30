@@ -25,8 +25,11 @@ defmodule ToriEconomy.Api do
       {"GET", "/internal/persona/v1/snapshot"} ->
         persona_snapshot(conn)
 
-      {"GET", "/internal/persona/v1/presence"} ->
-        persona_presence(conn)
+      {"GET", "/internal/persona/v2/context"} ->
+        persona_context(conn)
+
+      {"POST", "/internal/persona/v2/context"} ->
+        persona_context_update(conn)
 
       {"POST", "/internal/persona/v1/events"} ->
         persona_event(conn)
@@ -56,22 +59,92 @@ defmodule ToriEconomy.Api do
     end
   end
 
-  defp persona_presence(conn) do
+  defp persona_context(conn) do
     case authorized(conn) do
       :ok ->
-        state = Persona.snapshot()
-        seed = div(System.system_time(:second), 900)
-
-        reply(conn, 200, %{
-          "status" => "ok",
-          "suggestion" => Presence.choose(state, seed),
-          "mood" => Atom.to_string(state.mood),
-          "season" => Atom.to_string(state.season)
-        })
+        with {:ok, presence} <- current_presence() do
+          reply(conn, 200, presence_payload(presence))
+        else
+          {:error, :unavailable} -> reply(conn, 503, error(nil, "SERVICE_UNAVAILABLE", true))
+        end
 
       _ ->
         reply(conn, 401, error(nil, "FORBIDDEN", false))
     end
+  end
+
+  defp persona_context_update(conn) do
+    with :ok <- authorized(conn),
+         :ok <- json_content_type(conn),
+         {:ok, body, conn} <- read_body(conn, length: 1024),
+         {:ok, %{"schema_version" => 2, "activity" => activity} = payload} <-
+           Jason.decode(body),
+         true <- is_map(payload) and map_size(payload) in 2..4,
+         true <-
+           Enum.all?(Map.keys(payload), fn key ->
+             key in ["schema_version", "activity", "special_event", "ttl_seconds"]
+           end),
+         true <- is_binary(activity),
+         {:ok, presence} <-
+           update_presence(
+             activity,
+             Map.get(payload, "special_event"),
+             Map.get(payload, "ttl_seconds")
+           ) do
+      reply(conn, 200, presence_payload(presence))
+    else
+      {:error, "UNAUTHORIZED"} -> reply(conn, 401, error(nil, "FORBIDDEN", false))
+      {:error, :unavailable} -> reply(conn, 503, error(nil, "SERVICE_UNAVAILABLE", true))
+      {:more, _body, conn} -> reply(conn, 413, error(nil, "INVALID_INPUT", false))
+      _ -> reply(conn, 400, error(nil, "INVALID_INPUT", false))
+    end
+  end
+
+  defp current_presence do
+    {:ok, Presence.snapshot()}
+  catch
+    :exit, _ -> {:error, :unavailable}
+  end
+
+  defp update_presence(activity, special_event, ttl_seconds) do
+    Presence.set_context(activity,
+      special_event: special_event,
+      ttl_seconds: ttl_seconds
+    )
+  catch
+    :exit, _ -> {:error, :unavailable}
+  end
+
+  defp presence_payload(presence) do
+    persona = Persona.snapshot()
+
+    {season, calendar_event} =
+      case persona.season do
+        :halloween -> {:autumn, "halloween"}
+        :christmas -> {:winter, "christmas"}
+        :valentines -> {:winter, "valentine"}
+        season -> {season, nil}
+      end
+
+    %{
+      "schema_version" => 2,
+      "activity" => presence.activity,
+      "mood" => Atom.to_string(persona.mood),
+      "season" => Atom.to_string(season),
+      "special_event" => presence.special_event || calendar_event,
+      "intensity" => persona.intensity,
+      "revision" => presence.revision,
+      "updated_at" => iso_timestamp(presence.updated_at_ms),
+      "expires_at" => iso_timestamp(presence.expires_at_ms)
+    }
+  end
+
+  defp iso_timestamp(nil), do: nil
+
+  defp iso_timestamp(milliseconds) do
+    milliseconds
+    |> DateTime.from_unix!(:millisecond)
+    |> DateTime.to_iso8601()
   end
 
   defp persona_event(conn) do
