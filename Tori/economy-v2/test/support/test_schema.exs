@@ -190,7 +190,7 @@ defmodule ToriEconomy.TestSchema do
     [[catalog_count]] =
       SQL.query!(Repo, "SELECT count(*) FROM economy_v2_catalog_items WHERE active", []).rows
 
-    unless catalog_count >= 125 do
+    unless catalog_count >= 266 do
       raise "Incomplete Tori test schema: expanded catalog migration is missing"
     end
 
@@ -203,6 +203,14 @@ defmodule ToriEconomy.TestSchema do
              &(&1 in public_tables())
            ) do
       raise "Incomplete Tori test schema: progression or cosmetic selection schema is missing"
+    end
+
+    unless SQL.query!(
+             Repo,
+             "SELECT count(*) FROM economy_v2_catalog_items WHERE 'content_drop_v1'=ANY(tags)",
+             []
+           ).rows == [[100]] do
+      raise "Incomplete Tori test schema: V11 item-content drop is missing"
     end
 
     unless SQL.query!(

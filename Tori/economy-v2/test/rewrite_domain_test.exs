@@ -68,31 +68,134 @@ defmodule ToriEconomy.RewriteDomainTest do
     refute Enum.any?(selected, &(&1.id == "b"))
   end
 
-  test "V10 catalog expands style categories without replacing original identifiers" do
+  test "V11 content drop adds complete style groups without replacing original identifiers" do
     assert [[count]] =
              Sql.query!("SELECT count(*) FROM economy_v2_catalog_items WHERE active").rows
 
-    assert count >= 125
+    assert count >= 266
 
-    for category <-
-          ~w(fashion accessories beauty ballet volleyball cheer consumables collectibles seasonal) do
-      assert [[true]] =
+    for {category, expected_count} <- [
+          {"fashion", 18},
+          {"accessories", 16},
+          {"beauty", 10},
+          {"ballet", 10},
+          {"volleyball", 10},
+          {"cheer", 10},
+          {"consumables", 8},
+          {"collectibles", 8},
+          {"seasonal", 10}
+        ] do
+      assert [[actual_count]] =
                Sql.query!(
-                 "SELECT count(*)>0 FROM economy_v2_catalog_items WHERE active AND category=$1",
+                 "SELECT count(*) FROM economy_v2_catalog_items WHERE active AND 'content_drop_v1'=ANY(tags) AND category=$1",
                  [category]
                ).rows
+
+      assert actual_count == expected_count
     end
+
+    assert [[100, 100]] =
+             Sql.query!(
+               "SELECT count(*),count(DISTINCT item_id) FROM economy_v2_catalog_items WHERE 'content_drop_v1'=ANY(tags)"
+             ).rows
+
+    assert [[0]] =
+             Sql.query!("""
+               SELECT count(*) FROM economy_v2_catalog_items
+               WHERE 'content_drop_v1'=ANY(tags) AND
+                 (NOT active OR category NOT IN ('fashion','accessories','beauty','ballet','volleyball',
+                   'cheer','consumables','collectibles','seasonal') OR
+                  rarity NOT IN ('common','uncommon','rare','special') OR
+                  buy_price IS NULL OR buy_price NOT BETWEEN 1 AND 1000000000 OR
+                  sell_price IS NULL OR sell_price NOT BETWEEN 1 AND 1000000000 OR
+                  sell_price <> greatest(1,buy_price/2) OR rotation_weight < 1 OR max_stack IS NULL OR max_stack < 1 OR
+                  (NOT stackable AND max_stack <> 1))
+             """).rows
+
+    assert [[0]] =
+             Sql.query!("""
+               SELECT count(*) FROM economy_v2_catalog_items c
+               CROSS JOIN LATERAL unnest(c.equip_slots || c.conflict_slots) AS slot_values(value)
+               WHERE 'content_drop_v1'=ANY(c.tags)
+                 AND slot_values.value NOT IN
+                   ('top','bottom','dress','outerwear','shoes','bag','accessory','jewelry','hair_accessory')
+             """).rows
+
+    assert [[0]] =
+             Sql.query!("""
+               SELECT count(*) FROM economy_v2_catalog_items
+               WHERE 'content_drop_v1'=ANY(tags) AND
+                 (('top'=ANY(equip_slots) AND NOT ('dress'=ANY(conflict_slots))) OR
+                  ('bottom'=ANY(equip_slots) AND NOT ('dress'=ANY(conflict_slots))) OR
+                  ('dress'=ANY(equip_slots) AND NOT
+                    (conflict_slots @> ARRAY['top','bottom']::text[])))
+             """).rows
+
+    assert [[1]] =
+             Sql.query!("""
+               SELECT count(*) FROM economy_v2_catalog_items
+               WHERE item_id='rehearsal_wrap_skirt'
+                 AND equip_slots=ARRAY['bottom']::text[]
+                 AND conflict_slots=ARRAY['dress']::text[]
+             """).rows
+
+    assert [[1]] =
+             Sql.query!("""
+               SELECT count(*) FROM economy_v2_catalog_items
+               WHERE item_id='soft_lavender_cardigan'
+                 AND equip_slots=ARRAY['outerwear']::text[]
+                 AND cardinality(conflict_slots)=0
+             """).rows
+
+    assert [[1]] =
+             Sql.query!("""
+               SELECT count(*) FROM economy_v2_catalog_items
+               WHERE item_id='tori_moonlit_lavender_star' AND category='collectibles'
+                 AND rarity='special' AND buy_price=85000 AND NOT stackable AND max_stack=1
+             """).rows
+
+
+    assert [[0]] =
+             Sql.query!("""
+               SELECT count(*) FROM economy_v2_catalog_items
+               WHERE 'content_drop_v1'=ANY(tags) AND category='beauty'
+                 AND (cardinality(cosmetic_slots)=0 OR
+                      NOT (cosmetic_slots <@ ARRAY['nails','makeup','hair_accessory']::text[]) OR
+                      consumable OR stackable OR max_stack IS DISTINCT FROM 1 OR
+                      cardinality(equip_slots)>0)
+             """).rows
+
+    assert [[0]] =
+             Sql.query!("""
+               SELECT count(*) FROM economy_v2_catalog_items c
+               LEFT JOIN economy_v2_consumable_effects e ON e.item_id=c.item_id AND e.active
+               WHERE 'content_drop_v1'=ANY(c.tags) AND c.category='consumables'
+                 AND (NOT c.consumable OR NOT c.stackable OR c.max_stack<>10 OR
+                      cardinality(c.equip_slots)>0 OR cardinality(c.cosmetic_slots)>0 OR
+                      e.item_id IS NULL OR e.effect_code NOT IN ('hydration_boost','focus_boost') OR
+                      e.duration_ms NOT BETWEEN 1000 AND 900000)
+             """).rows
+
+    assert [[8]] =
+             Sql.query!("""
+               SELECT count(*) FROM economy_v2_consumable_effects e
+               JOIN economy_v2_catalog_items c ON c.item_id=e.item_id
+               WHERE 'content_drop_v1'=ANY(c.tags) AND c.category='consumables' AND e.active
+             """).rows
 
     assert [[1]] =
              Sql.query!(
                "SELECT count(*) FROM economy_v2_catalog_items WHERE item_id='leopard_baby_tee'"
              ).rows
 
-    assert [[2]] =
+    assert [[10]] =
              Sql.query!("SELECT count(*) FROM economy_v2_consumable_effects WHERE active").rows
 
     assert [[6]] =
-             Sql.query!("SELECT count(*) FROM economy_v2_activity_effect_rules WHERE active").rows
+             Sql.query!("""
+               SELECT count(*) FROM economy_v2_activity_effect_rules
+               WHERE active AND effect_code IN ('hydration_boost','focus_boost')
+             """).rows
   end
 
   test "career selection, practice, career XP, cooldown and replay are stateful and idempotent" do
@@ -747,6 +850,38 @@ defmodule ToriEconomy.RewriteDomainTest do
                "SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='practice_water'",
                [user]
              ).rows
+
+    gather = request("activity.perform", user, %{"activity" => "fish"})
+    assert {:ok, result} = Activity.execute(gather, fn _ -> 1 end)
+    assert result["result"]["credits"] == "11"
+  end
+
+  test "V11 smoothie uses the existing short-lived bounded activity effect" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+
+    Sql.query!(
+      """
+      INSERT INTO economy_inventory(user_id,item_id,quantity)
+      VALUES ($1,'berry_hydration_smoothie',1),($1,'fishing_rod',1)
+      """,
+      [user]
+    )
+
+    Sql.query!(
+      "INSERT INTO economy_equipment(user_id,slot,item_id) VALUES ($1,'rod','fishing_rod')",
+      [user]
+    )
+
+    assert [[900000]] =
+             Sql.query!("""
+               SELECT duration_ms FROM economy_v2_consumable_effects
+               WHERE item_id='berry_hydration_smoothie' AND active
+             """).rows
+
+    consume = request("inventory.consume", user, %{"item_id" => "berry_hydration_smoothie"})
+    assert {:ok, used} = Consumables.execute(consume)
+    assert used["result"]["effect_code"] == "hydration_boost"
 
     gather = request("activity.perform", user, %{"activity" => "fish"})
     assert {:ok, result} = Activity.execute(gather, fn _ -> 1 end)
