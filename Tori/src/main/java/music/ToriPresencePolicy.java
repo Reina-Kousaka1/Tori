@@ -16,7 +16,17 @@ final class ToriPresencePolicy {
 
     static List<Template> candidates(ToriPresenceContext context) {
         Objects.requireNonNull(context);
-        if (specialEvent(context.specialEvent()) != null) return specialEvent(context.specialEvent());
+        List<Template> eventChoices = specialEvent(context.specialEvent());
+        if (eventChoices == null) {
+            String seasonalEvent = switch (context.season()) {
+                case HALLOWEEN -> "halloween";
+                case CHRISTMAS -> "christmas";
+                case VALENTINE -> "valentine";
+                default -> null;
+            };
+            eventChoices = specialEvent(seasonalEvent);
+        }
+        if (eventChoices != null) return eventChoices;
 
         var result = new ArrayList<>(base(context.activity()));
         if (context.intensity() >= 0.3) addMood(result, context.activity(), context.mood());

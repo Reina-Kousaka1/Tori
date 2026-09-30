@@ -64,6 +64,14 @@ class ToriPresencePolicyTest {
             ToriPresencePolicy.resolve(context, 4, bound -> 0, null).getName());
     }
 
+    @Test void eventSeasonValuesAlsoUseTheHighPriorityEventTemplates() {
+        var christmas = new ToriPresenceContext(ToriPresenceContext.Activity.VOLLEYBALL,
+            ToriPresenceContext.Mood.SLEEPY, ToriPresenceContext.Season.CHRISTMAS,
+            null, 0.8, 5, null, null);
+        assertEquals(List.of("Making a Christmas wish list ✨🎄",
+            "Holiday break after practice 🎄"), ToriPresencePolicy.candidateTexts(christmas));
+    }
+
     @Test void futureUnknownValuesDegradeToGeneralSafeDefaults() throws Exception {
         var json = JSON.readTree("""
             {"schema_version":2,"activity":"new_future_activity","mood":"mysterious",
