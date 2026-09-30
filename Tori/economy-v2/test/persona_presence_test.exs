@@ -43,6 +43,7 @@ defmodule ToriEconomy.Persona.PresenceTest do
              Presence.set_context("school", server: server, now_ms: 2_000)
     assert Presence.snapshot(server, 100_000).activity == "school"
   end
+
   defp stop_server(server) do
     try do
       if Process.alive?(server) do
