@@ -56,8 +56,6 @@ final class ToriPresenceSync implements AutoCloseable {
 
     boolean available() { return provider != null && !closed; }
 
-    boolean available() { return provider != null && !closed; }
-
     ToriPresenceContext current() {
         var value = cached;
         return value.expiredAt(clock.instant()) ? ToriPresenceContext.general() : value;
