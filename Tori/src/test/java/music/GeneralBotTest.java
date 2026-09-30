@@ -147,11 +147,32 @@ class GeneralBotTest {
             timer.advance(60_000);
             assertEquals("Owner text", fixture.lastActivity.get().getName());
             bot.handle(fixture.event("status", OWNER, Map.of("action", "stop")), Language.EN);
-            assertEquals("with my Besties! | ballet + volleyball 🎀🏐 | 4 servers | 1 shards", fixture.lastActivity.get().getName());
+            assertGeneralPresence(fixture);
+            String restoredText = fixture.lastActivity.get().getName();
             timer.advance(StatusRotation.DEFAULT_INTERVAL_MS);
-            assertEquals(OnlineStatus.ONLINE, fixture.lastStatus.get());
-            assertEquals("Ballet practice, then volleyball 🩰🏐 | (1)", fixture.lastActivity.get().getName());
+            assertGeneralPresence(fixture);
+            assertNotEquals(restoredText, fixture.lastActivity.get().getName(),
+                "The normal Presence V2 rotation should continue after clearing the owner override");
         }
+    }
+
+    private static void assertGeneralPresence(Fixture fixture) {
+        var activity = fixture.lastActivity.get();
+        assertNotNull(activity);
+        assertEquals(OnlineStatus.ONLINE, fixture.lastStatus.get());
+
+        var match = ToriPresencePolicy.candidates(ToriPresenceContext.general()).stream()
+            .filter(template -> ToriPresencePolicy.withShard(template.text(), fixture.shardCount)
+                .equals(activity.getName()))
+            .findFirst().orElse(null);
+        assertNotNull(match, "The restored status must use a General fallback template with the current JDA shard count");
+
+        var expectedType = switch (match.kind()) {
+            case CUSTOM -> Activity.ActivityType.CUSTOM_STATUS;
+            case PLAYING -> Activity.ActivityType.PLAYING;
+            case WATCHING -> Activity.ActivityType.WATCHING;
+        };
+        assertEquals(expectedType, activity.getType());
     }
 
     @Test void helpIsAnEmbedAndAvatarIsPublicWithAnIdLookup() throws Exception {
