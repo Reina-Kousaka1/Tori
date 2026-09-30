@@ -108,7 +108,8 @@ defmodule ToriEconomy.RewriteDomainTest do
                   rarity NOT IN ('common','uncommon','rare','special') OR
                   buy_price IS NULL OR buy_price NOT BETWEEN 1 AND 1000000000 OR
                   sell_price IS NULL OR sell_price NOT BETWEEN 1 AND 1000000000 OR
-                  sell_price <> greatest(1,buy_price/2) OR rotation_weight < 1 OR max_stack IS NULL OR max_stack < 1 OR
+                  sell_price <> greatest(1,buy_price/2) OR rotation_weight < 1 OR
+                  max_stack IS NULL OR max_stack < 1 OR
                   (NOT stackable AND max_stack <> 1))
              """).rows
 
@@ -153,7 +154,6 @@ defmodule ToriEconomy.RewriteDomainTest do
                WHERE item_id='tori_moonlit_lavender_star' AND category='collectibles'
                  AND rarity='special' AND buy_price=85000 AND NOT stackable AND max_stack=1
              """).rows
-
 
     assert [[0]] =
              Sql.query!("""

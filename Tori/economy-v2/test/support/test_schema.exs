@@ -27,6 +27,8 @@ defmodule ToriEconomy.TestSchema do
                 Enum.each(migrations, fn {_version, path} ->
                   SQL.query!(Repo, File.read!(path), [], query_type: :text)
                 end)
+              else
+                apply_v11_content_drop_if_missing!(migrations)
               end
 
               verify_schema!(migrations)
@@ -120,6 +122,41 @@ defmodule ToriEconomy.TestSchema do
     end
 
     migrations
+  end
+
+  # Reuse an older isolated test schema by applying only the new idempotent content seed.
+  # ensure_target!/1 has already verified this is an explicitly configured *_test database.
+  defp apply_v11_content_drop_if_missing!(migrations) do
+    tables = public_tables()
+
+    if "economy_v2_catalog_items" in tables and "economy_v2_consumable_effects" in tables do
+      columns =
+        SQL.query!(
+          Repo,
+          "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='economy_v2_catalog_items'",
+          []
+        ).rows
+        |> Enum.map(&hd/1)
+
+      if "tags" in columns do
+        [[drop_count]] =
+          SQL.query!(
+            Repo,
+            "SELECT count(*) FROM economy_v2_catalog_items WHERE 'content_drop_v1'=ANY(tags)",
+            []
+          ).rows
+
+        if drop_count < 100 do
+          case Enum.find(migrations, fn {version, _path} -> version == 11 end) do
+            {11, path} ->
+              SQL.query!(Repo, File.read!(path), [], query_type: :text)
+
+            nil ->
+              raise "Missing V11 catalog content migration in the test schema"
+          end
+        end
+      end
+    end
   end
 
   defp public_tables do
