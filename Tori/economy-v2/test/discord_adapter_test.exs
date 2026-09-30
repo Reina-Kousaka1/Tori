@@ -1,5 +1,6 @@
 defmodule ToriEconomy.Discord.AdapterTest do
   use ExUnit.Case, async: true
+  alias ToriEconomy.Contract
   alias ToriEconomy.Discord.Adapter
   alias ToriEconomy.Discord.NostrumConsumer
   alias ToriEconomy.Discord.PreviewCommands
@@ -13,6 +14,44 @@ defmodule ToriEconomy.Discord.AdapterTest do
   test "preview requires a guild and a real interaction identity" do
     assert :ignore == Adapter.handle(%{data: %{name: "tori-profile-preview"}, id: 1,
                                       guild_id: nil, channel_id: 2})
+  end
+
+  test "only mutations receive a stable Discord interaction idempotency key" do
+    interaction_id = 123_456_789_012_345_678
+
+    assert Adapter.idempotency_key("shop.purchase", interaction_id) ==
+             "discord-interaction:123456789012345678"
+
+    assert Adapter.idempotency_key("profile.snapshot", interaction_id) == nil
+    assert Adapter.idempotency_key("unknown.operation", interaction_id) == nil
+
+    context = %{
+      "actor_user_id" => Integer.to_string(interaction_id),
+      "guild_id" => "234567890123456789",
+      "channel_id" => "345678901234567890"
+    }
+
+    assert {:ok, %{operation: "shop.purchase"}} =
+             Contract.validate(%{
+               "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
+               "idempotency_key" => Adapter.idempotency_key("shop.purchase", interaction_id),
+               "operation" => "shop.purchase",
+               "context" => context,
+               "args" => %{
+                 "item_id" => "leopard_baby_tee",
+                 "quantity" => 1,
+                 "period_key" => "20260930"
+               }
+             })
+
+    assert {:ok, %{operation: "profile.snapshot"}} =
+             Contract.validate(%{
+               "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7c",
+               "idempotency_key" => Adapter.idempotency_key("profile.snapshot", interaction_id),
+               "operation" => "profile.snapshot",
+               "context" => context,
+               "args" => %{}
+             })
   end
 
   test "read-only preview routes cover the new domain surfaces without claiming JDA commands" do

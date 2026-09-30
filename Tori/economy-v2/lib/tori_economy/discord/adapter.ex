@@ -27,6 +27,14 @@ defmodule ToriEconomy.Discord.Adapter do
   def preview_commands, do: Map.keys(@commands)
   def shop_categories, do: @shop_categories
 
+  @doc false
+  def idempotency_key(operation, interaction_id)
+      when operation in @mutations and is_integer(interaction_id) do
+    "discord-interaction:" <> Integer.to_string(interaction_id)
+  end
+
+  def idempotency_key(_operation, _interaction_id), do: nil
+
   def supported_interaction?(interaction) do
     data = field(interaction, :data, %{})
     name = field(data, :name, nil)
@@ -105,7 +113,7 @@ defmodule ToriEconomy.Discord.Adapter do
     with {:ok, user} <- actor_id(interaction),
          {subcommand, options} <- command_options(interaction),
          {:ok, operation, args} <- operation_for(preview, subcommand, options),
-         key = if operation in @mutations, do: "discord-interaction:" <> Integer.to_string(interaction_id),
+         key = idempotency_key(operation, interaction_id),
          {:ok, request} <- Contract.validate(%{
            "request_id" => Ecto.UUID.generate(), "idempotency_key" => key,
            "operation" => operation,
