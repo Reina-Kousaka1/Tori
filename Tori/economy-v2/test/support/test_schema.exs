@@ -138,7 +138,28 @@ defmodule ToriEconomy.TestSchema do
         ).rows
         |> Enum.map(&hd/1)
 
-      if "tags" in columns do
+      if Enum.all?(
+           [
+             "subcategory",
+             "rarity",
+             "buy_price",
+             "sell_price",
+             "rotation_weight",
+             "season",
+             "stackable",
+             "max_stack",
+             "consumable",
+             "tradeable",
+             "equip_slots",
+             "conflict_slots",
+             "tags",
+             "level_requirement",
+             "cosmetic_slots",
+             "career_requirement",
+             "career_level_requirement"
+           ],
+           &(&1 in columns)
+         ) do
         [[drop_count]] =
           SQL.query!(
             Repo,
