@@ -52,7 +52,8 @@ defmodule ToriEconomy.Contract do
     with :ok <- keys(args, ["category", "page"]),
          category when is_binary(category) <- Map.get(args, "category", "all"),
          true <- category == "all" or Regex.match?(~r/^[a-z0-9_-]{1,64}$/, category),
-         page when is_integer(page) and page in 0..1000 <- Map.get(args, "page", 0), do: :ok
+         page when is_integer(page) and page in 0..1000 <- Map.get(args, "page", 0) do
+      :ok
     else
       _ -> {:error, "INVALID_INPUT"}
     end

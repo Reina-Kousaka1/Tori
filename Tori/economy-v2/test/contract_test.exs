@@ -98,6 +98,23 @@ defmodule ToriEconomy.ContractTest do
     assert {:error, "INVALID_INPUT"} = Contract.validate(invalid_category)
   end
 
+  test "inventory and wardrobe lists validate category and page" do
+    for operation <- ["inventory.list", "wardrobe.list"] do
+      request =
+        @base
+        |> Map.put("operation", operation)
+        |> Map.put("idempotency_key", nil)
+        |> Map.put("args", %{"category" => "dresses", "page" => 1000})
+
+      assert {:ok, %{operation: ^operation}} = Contract.validate(request)
+      assert {:error, "INVALID_INPUT"} =
+               Contract.validate(put_in(request, ["args", "category"], "bad/category"))
+
+      assert {:error, "INVALID_INPUT"} =
+               Contract.validate(put_in(request, ["args", "page"], 1001))
+    end
+  end
+
   test "marketplace listing inspection is a read and validates only a stable listing ID" do
     inspect = @base |> Map.put("operation", "marketplace.inspect")
       |> Map.put("args", %{"listing_id" => "listing_123"}) |> Map.delete("idempotency_key")
