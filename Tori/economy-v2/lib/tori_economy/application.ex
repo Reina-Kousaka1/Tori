@@ -2,6 +2,8 @@ defmodule ToriEconomy.Application do
   @moduledoc "Supervision boundary for the internal economy service. Disabled by default."
   use Application
 
+  alias ToriEconomy.Discord.Config, as: DiscordConfig
+
   @test_environment Mix.env() == :test
 
   @impl true
@@ -49,14 +51,7 @@ defmodule ToriEconomy.Application do
 
     Application.put_env(:tori_economy, ToriEconomy.Repo, database_options() ++ [pool_size: 5])
 
-    discord_children =
-      if System.get_env("TORI_NOSTRUM_ENABLED") == "true" do
-        token = System.fetch_env!("TORI_NOSTRUM_TOKEN")
-        Nostrum.Token.check_token!(token)
-        [ToriEconomy.Discord.PreviewGateway, ToriEconomy.Discord.PreviewCommands]
-      else
-        []
-      end
+    discord_children = discord_children()
 
     [
       ToriEconomy.Repo,
@@ -64,6 +59,28 @@ defmodule ToriEconomy.Application do
       ToriEconomy.Persona.Presence,
       {Bandit, plug: ToriEconomy.Api, ip: ip, port: port}
     ] ++ discord_children
+  end
+
+  defp discord_children do
+    case DiscordConfig.load!() do
+      :disabled ->
+        []
+
+      {:enabled, %{token: token, guild_id: guild_id}} ->
+        validate_discord_token!(token)
+        Application.put_env(:nostrum, :token, token)
+        [{ToriEconomy.Discord.Gateway, []}, {ToriEconomy.Discord.Commands, guild_id: guild_id}]
+    end
+  end
+
+  defp validate_discord_token!(token) do
+    try do
+      :ok = Nostrum.Token.check_token!(token)
+    rescue
+      _ -> raise ArgumentError, "DISCORD_TOKEN is invalid"
+    catch
+      _, _ -> raise ArgumentError, "DISCORD_TOKEN is invalid"
+    end
   end
 
   defp database_options do

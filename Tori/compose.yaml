@@ -60,10 +60,8 @@ services:
       TORI_SHOP_ROTATION_HOURS: ${TORI_SHOP_ROTATION_HOURS:-24}
       TORI_SHOP_ROTATION_SIZE: ${TORI_SHOP_ROTATION_SIZE:-12}
       TORI_NOSTRUM_ENABLED: ${TORI_NOSTRUM_ENABLED:-false}
-      TORI_NOSTRUM_PREVIEW_ONLY: ${TORI_NOSTRUM_PREVIEW_ONLY:-false}
-      TORI_NOSTRUM_TOKEN: ${TORI_NOSTRUM_TOKEN:-}
-      TORI_NOSTRUM_APPLICATION_ID: ${TORI_NOSTRUM_APPLICATION_ID:-}
-      TORI_NOSTRUM_PREVIEW_GUILD_ID: ${TORI_NOSTRUM_PREVIEW_GUILD_ID:-}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:4001/internal/economy/v1/health"]
       interval: 20s
@@ -82,7 +80,7 @@ services:
     env_file: .env
     environment:
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
-      DISCORD_TOKEN: ${DISCORD_TOKEN:?Bot-Token in .env setzen}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
       BOT_RESTART_EXTERNAL: "true"
       BOT_OWNER_ID: ${BOT_OWNER_ID:-}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}

@@ -1,5 +1,5 @@
 defmodule ToriEconomy.Discord.Adapter do
-  @moduledoc "Opt-in Discord preview adapter over the same validated Elixir domain boundary."
+  @moduledoc "Discord adapter over the shared, validated Elixir domain boundary."
   alias ToriEconomy.{Contract, Dispatcher, Persona, WriteGate}
 
   @commands %{
@@ -14,6 +14,7 @@ defmodule ToriEconomy.Discord.Adapter do
     "tori-consumable-preview" => :consumables,
     "tori-activity-preview" => :activities
   }
+  @nostrum_commands ~w(profile career)
   @shop_categories [
     {"All styles", "all"},
     {"Fashion", "fashion"},
@@ -33,6 +34,7 @@ defmodule ToriEconomy.Discord.Adapter do
     marketplace.cancel career.select career.practice inventory.consume activity.perform)
 
   def preview_commands, do: Map.keys(@commands)
+  def nostrum_commands, do: @nostrum_commands
   def shop_categories, do: @shop_categories
 
   @doc false
@@ -45,11 +47,7 @@ defmodule ToriEconomy.Discord.Adapter do
 
   def supported_interaction?(interaction) do
     data = field(interaction, :data, %{})
-    name = field(data, :name, nil)
-    custom_id = field(data, :custom_id, nil)
-
-    name in Map.keys(@commands) or
-      (is_binary(custom_id) and String.starts_with?(custom_id, "tori-shop-"))
+    field(data, :name, nil) in @nostrum_commands
   end
 
   def component_interaction?(interaction) do
@@ -149,16 +147,16 @@ defmodule ToriEconomy.Discord.Adapter do
     else
       {:error, "READ_ONLY"} ->
         {:error,
-         "Preview writes are disabled. Use only the isolated *_test database for write previews."}
+         "Tori economy writes are currently disabled."}
 
       {:error, code} when is_binary(code) ->
         {:error, error_text(code)}
 
       _ ->
-        {:error, "This Tori preview is currently unavailable."}
+        {:error, "This Tori command is currently unavailable."}
     end
   rescue
-    _ -> {:error, "This Tori preview is currently unavailable."}
+    _ -> {:error, "This Tori command is currently unavailable."}
   end
 
   defp operation_for(:profile, _subcommand, _options), do: {:ok, "profile.snapshot", %{}}

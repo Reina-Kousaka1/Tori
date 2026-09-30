@@ -1,5 +1,5 @@
 defmodule ToriEconomy.Discord.NostrumConsumer do
-  @moduledoc "Opt-in preview gateway. Never registers or handles existing JDA commands."
+  @moduledoc "Nostrum consumer for the Elixir-owned /career and /profile commands."
   use Nostrum.Consumer
   require Logger
   alias ToriEconomy.Discord.Adapter
@@ -20,9 +20,9 @@ defmodule ToriEconomy.Discord.NostrumConsumer do
       _ -> :ok
     end
   rescue
-    _ -> Logger.warning("Could not acknowledge a Tori preview interaction")
+    _ -> Logger.warning("Could not acknowledge a Tori main-bot interaction")
   catch
-    _, _ -> Logger.warning("Could not acknowledge a Tori preview interaction")
+    _, _ -> Logger.warning("Could not acknowledge a Tori main-bot interaction")
   end
 
   def acknowledgement(interaction) do
@@ -48,10 +48,10 @@ defmodule ToriEconomy.Discord.NostrumConsumer do
     %{
       embeds: [
         %{
-          title: "Tori · Preview",
+          title: "Tori",
           description: content,
           color: 0xC5A15A,
-          footer: %{text: "Private test-guild preview"}
+          footer: %{text: "Career and profile"}
         }
       ],
       components: components,
@@ -69,16 +69,16 @@ defmodule ToriEconomy.Discord.NostrumConsumer do
     case result do
       {:ok, content} -> edit_interaction(interaction, content)
       {:error, content} -> edit_interaction(interaction, content)
-      :ignore -> edit_interaction(interaction, "This Tori preview interaction is not available.")
+      :ignore -> edit_interaction(interaction, "This Tori command is not available.")
     end
   rescue
     _ ->
-      Logger.warning("Tori preview domain request failed")
-      safe_edit_interaction(interaction, "This Tori preview is currently unavailable.")
+      Logger.warning("Tori main-bot command request failed")
+      safe_edit_interaction(interaction, "This Tori command is currently unavailable.")
   catch
     _, _ ->
-      Logger.warning("Tori preview domain request failed")
-      safe_edit_interaction(interaction, "This Tori preview is currently unavailable.")
+      Logger.warning("Tori main-bot command request failed")
+      safe_edit_interaction(interaction, "This Tori command is currently unavailable.")
   end
 
   defp edit_interaction(interaction, content) do
