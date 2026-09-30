@@ -63,12 +63,23 @@ final class ToriPresenceSync implements AutoCloseable {
 
     ToriPresenceContext setContext(String activity, String specialEvent, Long ttlSeconds) throws Exception {
         if (provider == null) throw new IllegalStateException("Tori presence provider is not configured");
-        return accept(provider.update(activity, specialEvent, ttlSeconds));
+        try {
+            return accept(provider.update(activity, specialEvent, ttlSeconds));
+        } catch (ToriPresenceClient.InvalidContextException ex) {
+            resetToGeneral();
+            throw ex;
+        }
     }
 
     /** Package-visible so cache recovery and expiry behavior can be verified without a live service. */
     void pollOnce() throws Exception {
-        if (provider != null) accept(provider.fetch());
+        if (provider == null) return;
+        try {
+            accept(provider.fetch());
+        } catch (ToriPresenceClient.InvalidContextException ex) {
+            resetToGeneral();
+            throw ex;
+        }
     }
 
     private void pollSafely() {
@@ -81,8 +92,7 @@ final class ToriPresenceSync implements AutoCloseable {
 
     private ToriPresenceContext accept(ToriPresenceContext next) {
         Objects.requireNonNull(next);
-        if (next.expiredAt(clock.instant()))
-            throw new IllegalArgumentException("Presence provider returned an expired context");
+        if (next.expiredAt(clock.instant())) return resetToGeneral();
         var previous = cached;
         if (next.revision() < previous.revision()
             && next.updatedAt() != null
@@ -92,6 +102,14 @@ final class ToriPresenceSync implements AutoCloseable {
         cached = next;
         if (!next.equals(previous)) listener.accept(next);
         return next;
+    }
+
+    private ToriPresenceContext resetToGeneral() {
+        var previous = cached;
+        var fallback = ToriPresenceContext.general();
+        cached = fallback;
+        if (!fallback.equals(previous)) listener.accept(fallback);
+        return fallback;
     }
 
     @Override public synchronized void close() {

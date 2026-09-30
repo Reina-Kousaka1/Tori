@@ -1,5 +1,6 @@
 package music;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -58,6 +59,23 @@ final class ToriPresenceClient implements ToriPresenceSync.Provider {
     private static ToriPresenceContext context(HttpResponse<String> response) throws IOException {
         if (response.statusCode() != 200)
             throw new IOException("Presence provider returned HTTP " + response.statusCode());
-        return ToriPresenceContext.fromJson(JSON.readTree(response.body()));
+
+        JsonNode body;
+        try {
+            body = JSON.readTree(response.body());
+        } catch (IOException ex) {
+            throw new InvalidContextException(ex);
+        }
+        try {
+            return ToriPresenceContext.fromJson(body);
+        } catch (IllegalArgumentException ex) {
+            throw new InvalidContextException(ex);
+        }
+    }
+
+    static final class InvalidContextException extends IOException {
+        InvalidContextException(Throwable cause) {
+            super("Tori presence context is invalid", cause);
+        }
     }
 }

@@ -38,7 +38,7 @@ public record ToriPresenceContext(
     public static ToriPresenceContext fromJson(JsonNode json) {
         JsonNode version = json == null ? null : json.get("schema_version");
         if (json == null || !json.isObject() || version == null
-            || !version.isIntegralNumber() || version.asInt() != 2)
+            || !version.isIntegralNumber() || !version.canConvertToInt() || version.asInt() != 2)
             throw new IllegalArgumentException("Unsupported Tori presence context version");
 
         String activity = requiredText(json, "activity");
@@ -54,7 +54,7 @@ public record ToriPresenceContext(
             : Double.NaN;
         JsonNode revisionNode = json.get("revision");
         long revision = revisionNode == null || revisionNode.isNull() ? 0
-            : revisionNode.isIntegralNumber() ? revisionNode.asLong()
+            : revisionNode.isIntegralNumber() && revisionNode.canConvertToLong() ? revisionNode.asLong()
             : -1;
         Instant updatedAt = instant(json.get("updated_at"), "updated_at");
         Instant expiresAt = instant(json.get("expires_at"), "expires_at");
@@ -117,8 +117,9 @@ public record ToriPresenceContext(
 
     private static String optionalText(JsonNode json, String name, String fallback) {
         JsonNode value = json.get(name);
-        return value == null || value.isNull() ? fallback
-            : value.isTextual() ? value.asText() : fallback;
+        if (value == null || value.isNull()) return fallback;
+        if (!value.isTextual()) throw new IllegalArgumentException("Invalid presence field: " + name);
+        return value.asText();
     }
 
     private static String nullableText(JsonNode value) {

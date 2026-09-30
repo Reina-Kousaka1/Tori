@@ -93,8 +93,12 @@ class ToriPresencePolicyTest {
         var wrongIntensity = JSON.readTree("""
             {"schema_version":2,"activity":"ballet","intensity":"high"}
             """);
+        var wrongMood = JSON.readTree("""
+            {"schema_version":2,"activity":"ballet","mood":true}
+            """);
         assertThrows(IllegalArgumentException.class, () -> ToriPresenceContext.fromJson(wrongVersion));
         assertThrows(IllegalArgumentException.class, () -> ToriPresenceContext.fromJson(wrongIntensity));
+        assertThrows(IllegalArgumentException.class, () -> ToriPresenceContext.fromJson(wrongMood));
     }
 
     @Test void statusSelectionIsDeterministicWithAnInjectedPicker() {

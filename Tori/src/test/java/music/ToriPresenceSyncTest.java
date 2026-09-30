@@ -30,6 +30,17 @@ class ToriPresenceSyncTest {
         }
     }
 
+    @Test void invalidElixirContextResetsToGeneralWhileTransportFailuresKeepTheCache() throws Exception {
+        var source = new FakeProvider();
+        try (var sync = new ToriPresenceSync(source, Clock.systemUTC())) {
+            sync.pollOnce();
+            assertEquals(ToriPresenceContext.Activity.BALLET, sync.current().activity());
+            source.invalid.set(true);
+            assertThrows(ToriPresenceClient.InvalidContextException.class, sync::pollOnce);
+            assertEquals(ToriPresenceContext.general(), sync.current());
+        }
+    }
+
     @Test void expiredCachedContextSafelyFallsBackToGeneral() throws Exception {
         var clock = new MutableClock(Instant.parse("2026-09-30T12:00:00Z"));
         var source = new FakeProvider();
@@ -50,9 +61,12 @@ class ToriPresenceSyncTest {
                 ToriPresenceContext.Mood.FOCUSED, ToriPresenceContext.Season.AUTUMN,
                 null, 0.7, 1, Instant.now(), null));
         private final AtomicReference<Boolean> failure = new AtomicReference<>(false);
+        private final AtomicReference<Boolean> invalid = new AtomicReference<>(false);
 
         @Override public ToriPresenceContext fetch() throws Exception {
             if (failure.get()) throw new java.io.IOException("service unavailable");
+            if (invalid.get())
+                throw new ToriPresenceClient.InvalidContextException(new IllegalArgumentException("invalid"));
             return value.get();
         }
 
