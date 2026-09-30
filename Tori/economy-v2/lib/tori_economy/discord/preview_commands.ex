@@ -139,7 +139,14 @@ defmodule ToriEconomy.Discord.PreviewCommands do
     end
   end
 
-  defp ensure_success({:response, status, _body}, expected) when status in expected, do: :ok
+  defp ensure_success({:response, status, _body}, expected) do
+    if Enum.member?(expected, status) do
+      :ok
+    else
+      raise "Discord rejected a Tori preview command update"
+    end
+  end
+
   defp ensure_success(_, _), do: raise("Discord rejected a Tori preview command update")
   defp field(map, "name"), do: Map.get(map, "name", Map.get(map, :name))
   defp field(map, "id"), do: Map.get(map, "id", Map.get(map, :id))
