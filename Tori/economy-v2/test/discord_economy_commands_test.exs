@@ -228,6 +228,69 @@ defmodule ToriEconomy.Discord.EconomyCommandsTest do
     assert [[410]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [buyer]).rows
   end
 
+  test "marry, marriage and divorce slash handlers use the relationship domain" do
+    System.put_env("TORI_ECONOMY_WRITE_ENABLED", "true")
+    System.put_env("TORI_ECONOMY_WRITE_MODE", "test")
+    System.put_env("TORI_ECONOMY_DATABASE_URL", @url)
+
+    proposer = snowflake()
+    recipient = snowflake()
+
+    base = %{
+      guild_id: 234_567_890_123_456_789,
+      channel_id: 345_678_901_234_567_890
+    }
+
+    proposal =
+      Map.merge(base, %{
+        id: String.to_integer(snowflake()),
+        user: %{id: String.to_integer(proposer)},
+        data: %{
+          name: "marry",
+          options: [
+            %{
+              name: "propose",
+              options: [%{name: "user", value: String.to_integer(recipient)}]
+            }
+          ]
+        }
+      })
+
+    assert ToriEconomy.Discord.Adapter.supported_interaction?(proposal)
+    assert {:ok, proposed} = ToriEconomy.Discord.Adapter.handle(proposal)
+    assert proposed =~ "PENDING"
+
+    accept =
+      Map.merge(base, %{
+        id: String.to_integer(snowflake()),
+        user: %{id: String.to_integer(recipient)},
+        data: %{name: "marry", options: [%{name: "accept"}]}
+      })
+
+    assert {:ok, accepted} = ToriEconomy.Discord.Adapter.handle(accept)
+    assert accepted =~ "MARRIED"
+
+    inspect =
+      Map.merge(base, %{
+        id: String.to_integer(snowflake()),
+        user: %{id: String.to_integer(proposer)},
+        data: %{name: "marriage"}
+      })
+
+    assert {:ok, current} = ToriEconomy.Discord.Adapter.handle(inspect)
+    assert current =~ "MARRIED"
+
+    divorce =
+      Map.merge(base, %{
+        id: String.to_integer(snowflake()),
+        user: %{id: String.to_integer(proposer)},
+        data: %{name: "divorce"}
+      })
+
+    assert {:ok, ended} = ToriEconomy.Discord.Adapter.handle(divorce)
+    assert ended =~ "DIVORCED"
+  end
+
   defp restore(name, nil), do: System.delete_env(name)
   defp restore(name, value), do: System.put_env(name, value)
 end
