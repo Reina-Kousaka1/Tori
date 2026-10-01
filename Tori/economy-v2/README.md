@@ -92,9 +92,9 @@ Relationship from the V12 Marriage domain; it stores no relationship copy.
 Individual career actions do not record global Persona mood
 events or change Tori's global Presence context.
 
-The `/profile`, `/career`, `/marry`, `/divorce` and `/marriage` commands
-are Elixir-owned and registered in the configured main-bot guild when Nostrum
-is enabled. Optional `TORI_NOSTRUM_SHOP_ENABLED=true` transfers only `/shop`
+The `/profile`, `/career`, `/wardrobe`, `/marketplace`, `/marry`,
+`/divorce` and `/marriage` commands are Elixir-owned and registered in the
+configured main-bot guild when Nostrum is enabled. Optional `TORI_NOSTRUM_SHOP_ENABLED=true` transfers only `/shop`
 slash-command ownership: Java excludes it from registration and interaction
 handling when both Nostrum flags are true, and Elixir registers the V12 Catalog
 and featured-drop UI. It defaults to false. Java's remaining commands,
@@ -140,8 +140,10 @@ ownership, `/shop catalog` paginates active styles, `/shop browse` shows a
 persisted featured rotation, and `/shop item` and `/shop buy` accept an item ID.
 Catalog purchases reuse the account, ledger, inventory and idempotency
 transaction; a numeric featured period still checks rotation expiry and stock.
-Seasonal and limited-stock items retain their availability rules. This does
-not enable production wallet writes.
+Seasonal and limited-stock items retain their availability rules. `/wardrobe`
+uses existing Inventory/Equipment slots, and `/marketplace` uses existing
+listing escrow and purchase transactions. Java `/market`, `/equip` and tool
+commands remain Java-owned. This does not enable production wallet writes.
 
 `TORI_AUTOMOD_ENABLED=false` by default. When enabled with Nostrum, per-guild
 OTP processes detect join bursts, floods, mention spam and invite links.

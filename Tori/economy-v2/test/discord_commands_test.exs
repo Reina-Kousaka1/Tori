@@ -11,16 +11,25 @@ defmodule ToriEconomy.Discord.CommandsTest do
 
   test "the registrar exposes only Elixir-owned commands" do
     assert Enum.sort(Enum.map(Commands.definitions(), & &1["name"])) ==
-             ["career", "divorce", "marriage", "marry", "profile"]
+             ["career", "divorce", "marriage", "marketplace", "marry", "profile", "wardrobe"]
   end
 
   test "shop opt-in uses the same guild registrar without taking Java commands" do
     definitions = Commands.definitions(true)
     assert Enum.sort(Enum.map(definitions, & &1["name"])) ==
-             ["career", "divorce", "marriage", "marry", "profile", "shop"]
+             ["career", "divorce", "marriage", "marketplace", "marry", "profile", "shop", "wardrobe"]
 
     shop = Enum.find(definitions, &(&1["name"] == "shop"))
     assert Enum.map(shop["options"], & &1["name"]) == ["catalog", "browse", "item", "buy"]
+
+    wardrobe = Enum.find(definitions, &(&1["name"] == "wardrobe"))
+    assert Enum.map(wardrobe["options"], & &1["name"]) ==
+             ["list", "inspect", "equip", "unequip", "cosmetic", "clear"]
+
+    marketplace = Enum.find(definitions, &(&1["name"] == "marketplace"))
+    assert Enum.map(marketplace["options"], & &1["name"]) ==
+             ["browse", "inspect", "list", "buy", "cancel"]
+    refute Enum.any?(definitions, &(&1["name"] in ["market", "equip", "buy"]))
 
     buy = Enum.find(shop["options"], &(&1["name"] == "buy"))
     assert Enum.find(buy["options"], &(&1["name"] == "item_id"))["required"]
@@ -74,7 +83,7 @@ defmodule ToriEconomy.Discord.CommandsTest do
            }
 
     assert list_request == {:get, collection, @token, nil}
-    assert length(updates) == 5
+    assert length(updates) == 7
 
     registered_names =
       Enum.map(updates, fn {_method, _url, _token, payload} -> payload["name"] end)

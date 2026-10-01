@@ -8,6 +8,8 @@ defmodule ToriEconomy.Discord.Adapter do
     "marry" => :marry,
     "divorce" => :divorce,
     "marriage" => :marriage,
+    "wardrobe" => :wardrobe,
+    "marketplace" => :marketplace,
     "tori-profile-preview" => :profile,
     "tori-shop-preview" => :shop,
     "tori-wardrobe-preview" => :wardrobe,
@@ -17,7 +19,7 @@ defmodule ToriEconomy.Discord.Adapter do
     "tori-consumable-preview" => :consumables,
     "tori-activity-preview" => :activities
   }
-  @nostrum_commands ~w(profile career marry divorce marriage)
+  @nostrum_commands ~w(profile career marry divorce marriage wardrobe marketplace)
   @shop_categories [
     {"All styles", "all"},
     {"Fashion", "fashion"},

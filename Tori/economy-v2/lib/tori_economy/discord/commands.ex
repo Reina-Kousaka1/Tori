@@ -15,6 +15,8 @@ defmodule ToriEconomy.Discord.Commands do
       command("career", "View careers, select one, or complete an activity.", career_options()),
       command("marry", "Propose, accept or decline a relationship.", marriage_options()),
       command("divorce", "End your current marriage."),
+      wardrobe_command(),
+      marketplace_command(),
       command("marriage", "View a relationship.", [
         user_option("user", "Person to view; defaults to you.", false)
       ])
@@ -145,6 +147,46 @@ defmodule ToriEconomy.Discord.Commands do
 
   defp sub(name, description, options \\ []),
     do: %{"name" => name, "description" => description, "type" => 1, "options" => options}
+
+  defp wardrobe_command do
+    command("wardrobe", "Inspect and equip owned Tori styles.", [
+      sub("list", "Browse your owned styles.", [
+        string("category", "Item category", false),
+        integer("page", "Page number, starting at zero", false, 0, 1000)
+      ]),
+      sub("inspect", "Inspect an owned item.", [string("item_id", "Catalog item ID", true)]),
+      sub("equip", "Equip an owned fashion item.", [
+        string("item_id", "Catalog item ID", true),
+        string("slot", "Style slot", true)
+      ]),
+      sub("unequip", "Clear an equipped style slot.", [string("slot", "Style slot", true)]),
+      sub("cosmetic", "Select a permanent cosmetic unlock.", [
+        string("item_id", "Catalog item ID", true),
+        string("slot", "Cosmetic slot", true)
+      ]),
+      sub("clear", "Clear a cosmetic selection.", [string("slot", "Cosmetic slot", true)])
+    ])
+  end
+
+  defp marketplace_command do
+    command("marketplace", "Trade owned catalog items with other players.", [
+      sub("browse", "Browse active player listings.", [
+        string("category", "Item category", false),
+        integer("page", "Page number, starting at zero", false, 0, 1000)
+      ]),
+      sub("inspect", "Inspect an active listing.", [
+        string("listing_id", "Listing ID", true)
+      ]),
+      sub("list", "List an owned item for sale.", [
+        string("item_id", "Catalog item ID", true),
+        string("ask_price", "Price in Credits", true),
+        integer("quantity", "Quantity", false, 1, 100),
+        integer("expires_hours", "Listing lifetime in hours", false, 1, 168)
+      ]),
+      sub("buy", "Buy a player listing.", [string("listing_id", "Listing ID", true)]),
+      sub("cancel", "Cancel your listing.", [string("listing_id", "Listing ID", true)])
+    ])
+  end
 
   defp marriage_options do
     [

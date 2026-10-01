@@ -140,6 +140,92 @@ defmodule ToriEconomy.Discord.EconomyCommandsTest do
                "SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1 AND leg='shop_debit'",
                ["discord-interaction:#{base.id}"]
              ).rows
+
+    equip =
+      %{base | id: String.to_integer(snowflake())}
+      |> Map.put(:data, %{
+        name: "wardrobe",
+        options: [
+          %{
+            name: "equip",
+            options: [
+              %{name: "item_id", value: item_id},
+              %{name: "slot", value: "outerwear"}
+            ]
+          }
+        ]
+      })
+
+    assert ToriEconomy.Discord.Adapter.supported_interaction?(equip)
+    assert {:ok, _} = ToriEconomy.Discord.Adapter.handle(equip)
+
+    profile = Map.put(base, :data, %{name: "profile"})
+    assert {:ok, profile_text} = ToriEconomy.Discord.Adapter.handle(profile)
+    assert profile_text =~ "outerwear: Soft Lavender Cardigan"
+  end
+
+  test "the main-bot marketplace lists and buys through shared inventory and ledger" do
+    System.put_env("TORI_ECONOMY_WRITE_ENABLED", "true")
+    System.put_env("TORI_ECONOMY_WRITE_MODE", "test")
+    System.put_env("TORI_ECONOMY_DATABASE_URL", @url)
+
+    seller = snowflake()
+    buyer = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,0),($2,500)", [seller, buyer])
+
+    Sql.query!(
+      "INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'pink_lace_cami',1)",
+      [seller]
+    )
+
+    base = %{
+      guild_id: 234_567_890_123_456_789,
+      channel_id: 345_678_901_234_567_890
+    }
+
+    listing =
+      Map.merge(base, %{
+        id: String.to_integer(snowflake()),
+        user: %{id: String.to_integer(seller)},
+        data: %{
+          name: "marketplace",
+          options: [
+            %{
+              name: "list",
+              options: [
+                %{name: "item_id", value: "pink_lace_cami"},
+                %{name: "ask_price", value: "90"}
+              ]
+            }
+          ]
+        }
+      })
+
+    assert ToriEconomy.Discord.Adapter.supported_interaction?(listing)
+    assert {:ok, listed} = ToriEconomy.Discord.Adapter.handle(listing)
+    assert [_, listing_id] = Regex.run(~r/Listing ID: `([a-z0-9_-]+)`/, listed)
+
+    buy =
+      Map.merge(base, %{
+        id: String.to_integer(snowflake()),
+        user: %{id: String.to_integer(buyer)},
+        data: %{
+          name: "marketplace",
+          options: [
+            %{name: "buy", options: [%{name: "listing_id", value: listing_id}]}
+          ]
+        }
+      })
+
+    assert {:ok, _} = ToriEconomy.Discord.Adapter.handle(buy)
+
+    assert [[1]] =
+             Sql.query!(
+               "SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='pink_lace_cami'",
+               [buyer]
+             ).rows
+
+    assert [[410]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [buyer]).rows
   end
 
   defp restore(name, nil), do: System.delete_env(name)

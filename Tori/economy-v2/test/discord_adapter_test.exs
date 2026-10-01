@@ -70,6 +70,8 @@ defmodule ToriEconomy.Discord.AdapterTest do
                "marry",
                "divorce",
                "marriage",
+               "wardrobe",
+               "marketplace",
                "tori-profile-preview",
                "tori-shop-preview",
                "tori-wardrobe-preview",
@@ -85,7 +87,7 @@ defmodule ToriEconomy.Discord.AdapterTest do
 
   test "the main-bot command definitions include career, profile and relationships" do
     assert Enum.sort(Enum.map(Commands.definitions(), & &1["name"])) ==
-             ["career", "divorce", "marriage", "marry", "profile"]
+             ["career", "divorce", "marriage", "marketplace", "marry", "profile", "wardrobe"]
     profile = Enum.find(Commands.definitions(), &(&1["name"] == "profile"))
     assert [%{"name" => "user", "type" => 6, "required" => false}] = profile["options"]
 
