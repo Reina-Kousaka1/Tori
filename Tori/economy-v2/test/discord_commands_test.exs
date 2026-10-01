@@ -9,13 +9,15 @@ defmodule ToriEconomy.Discord.CommandsTest do
   @api "https://discord.com/api/v10"
   @guild_commands_url "#{@api}/applications/#{@application_id}/guilds/#{@guild_id}/commands"
 
-  test "the registrar exposes only /career and /profile" do
-    assert Enum.sort(Enum.map(Commands.definitions(), & &1["name"])) == ["career", "profile"]
+  test "the registrar exposes only Elixir-owned commands" do
+    assert Enum.sort(Enum.map(Commands.definitions(), & &1["name"])) ==
+             ["career", "divorce", "marriage", "marry", "profile"]
   end
 
   test "shop opt-in uses the same guild registrar without taking Java commands" do
     definitions = Commands.definitions(true)
-    assert Enum.sort(Enum.map(definitions, & &1["name"])) == ["career", "profile", "shop"]
+    assert Enum.sort(Enum.map(definitions, & &1["name"])) ==
+             ["career", "divorce", "marriage", "marry", "profile", "shop"]
 
     shop = Enum.find(definitions, &(&1["name"] == "shop"))
     assert Enum.map(shop["options"], & &1["name"]) == ["catalog", "browse", "item", "buy"]
@@ -25,7 +27,7 @@ defmodule ToriEconomy.Discord.CommandsTest do
     assert Enum.find(buy["options"], &(&1["name"] == "quantity"))["type"] == 4
   end
 
-  test "the configured main-bot guild is used and no other commands are registered" do
+  test "the configured guild registration preserves Java-owned commands" do
     {:enabled, config} =
       Config.load(%{
         "TORI_NOSTRUM_ENABLED" => "true",
@@ -72,11 +74,12 @@ defmodule ToriEconomy.Discord.CommandsTest do
            }
 
     assert list_request == {:get, collection, @token, nil}
-    assert length(updates) == 2
+    assert length(updates) == 5
 
     registered_names =
       Enum.map(updates, fn {_method, _url, _token, payload} -> payload["name"] end)
-    assert Enum.sort(registered_names) == ["career", "profile"]
+    assert Enum.sort(registered_names) ==
+             ["career", "divorce", "marriage", "marry", "profile"]
 
     assert Enum.any?(updates, fn {method, url, _token, payload} ->
              method == :patch and url == collection <> "/345678901234567890" and

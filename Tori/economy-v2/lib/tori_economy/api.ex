@@ -248,6 +248,7 @@ defmodule ToriEconomy.Api do
               "shop.catalog",
               "wallet.leaderboard",
               "profile.snapshot",
+              "marriage.snapshot",
               "market.product",
               "market.history",
               "shop.rotation",

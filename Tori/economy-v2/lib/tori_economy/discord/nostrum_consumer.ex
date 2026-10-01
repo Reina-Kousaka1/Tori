@@ -1,5 +1,5 @@
 defmodule ToriEconomy.Discord.NostrumConsumer do
-  @moduledoc "Nostrum consumer for the Elixir-owned /career and /profile commands."
+  @moduledoc "Nostrum consumer for the Elixir-owned Tori commands."
   use Nostrum.Consumer
   require Logger
   alias ToriEconomy.Discord.Adapter
@@ -51,7 +51,7 @@ defmodule ToriEconomy.Discord.NostrumConsumer do
           title: "Tori",
           description: content,
           color: 0xC5A15A,
-          footer: %{text: "Career and profile"}
+          footer: %{text: "Tori economy"}
         }
       ],
       components: components,

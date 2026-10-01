@@ -1,6 +1,6 @@
 defmodule ToriEconomy.Queries do
   @moduledoc "Read-only queries over Tori's existing economy tables."
-  alias ToriEconomy.Sql
+  alias ToriEconomy.{Marriage, Sql}
 
   def execute(%{operation: "profile.snapshot"} = request) do
     user_id = request.context["target_user_id"] || request.context["actor_user_id"]
@@ -98,6 +98,7 @@ defmodule ToriEconomy.Queries do
       "equipment" => equipment,
       "loadout" => loadout,
       "cosmetics" => cosmetics,
+      "relationship" => Marriage.current_for(user_id),
       "activities" => activities,
       "progression" => progression
     })

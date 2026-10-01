@@ -5,6 +5,9 @@ defmodule ToriEconomy.Discord.Adapter do
   @commands %{
     "profile" => :profile,
     "career" => :career,
+    "marry" => :marry,
+    "divorce" => :divorce,
+    "marriage" => :marriage,
     "tori-profile-preview" => :profile,
     "tori-shop-preview" => :shop,
     "tori-wardrobe-preview" => :wardrobe,
@@ -14,7 +17,7 @@ defmodule ToriEconomy.Discord.Adapter do
     "tori-consumable-preview" => :consumables,
     "tori-activity-preview" => :activities
   }
-  @nostrum_commands ~w(profile career)
+  @nostrum_commands ~w(profile career marry divorce marriage)
   @shop_categories [
     {"All styles", "all"},
     {"Fashion", "fashion"},
@@ -31,7 +34,8 @@ defmodule ToriEconomy.Discord.Adapter do
   @shop_category_set MapSet.new(@shop_category_values)
   @mutations ~w(shop.purchase inventory.equip inventory.unequip
     inventory.cosmetic.select inventory.cosmetic.clear marketplace.list marketplace.buy
-    marketplace.cancel career.select career.practice inventory.consume activity.perform)
+    marketplace.cancel career.select career.practice inventory.consume activity.perform
+    marriage.propose marriage.accept marriage.decline marriage.cancel marriage.divorce)
 
   def preview_commands, do: Map.keys(@commands)
   def nostrum_commands, do: @nostrum_commands
@@ -263,6 +267,18 @@ defmodule ToriEconomy.Discord.Adapter do
 
   defp operation_for(:career, _subcommand, _options), do: {:ok, "career.snapshot", %{}}
 
+  defp operation_for(:marry, "propose", options),
+    do: {:ok, "marriage.propose", %{"target_user_id" => value(options, "user")}}
+
+  defp operation_for(:marry, action, _options) when action in ["accept", "decline", "cancel"],
+    do: {:ok, "marriage." <> action, %{}}
+
+  defp operation_for(:marriage, _subcommand, _options),
+    do: {:ok, "marriage.snapshot", %{}}
+
+  defp operation_for(:divorce, _subcommand, _options),
+    do: {:ok, "marriage.divorce", %{}}
+
   defp operation_for(:consumables, "inspect", options),
     do: {:ok, "inventory.item", %{"item_id" => value(options, "item_id")}}
 
@@ -396,7 +412,7 @@ defmodule ToriEconomy.Discord.Adapter do
       "channel_id" => Integer.to_string(channel)
     }
 
-    if preview == :profile do
+    if preview in [:profile, :marriage] do
       case Map.fetch(options, "user") do
         {:ok, target} when is_integer(target) ->
           Map.put(context, "target_user_id", Integer.to_string(target))
@@ -459,11 +475,26 @@ defmodule ToriEconomy.Discord.Adapter do
       ),
       if(outfit == [], do: "Outfit: empty", else: "Outfit: " <> Enum.join(outfit, " · ")),
       if(cosmetics == [], do: nil, else: "Style: " <> Enum.join(cosmetics, " · ")),
+      if(result["relationship"],
+        do: "Relationship: #{result["relationship"]["status"]} · <@#{result["relationship"]["partner_user_id"]}>",
+        else: nil
+      ),
       if(activities == [], do: nil, else: "Recent activity: " <> Enum.join(activities, " · "))
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
     |> clip()
+  end
+
+  defp format(preview, %{"type" => "marriage", "relationship" => relationship}, _user)
+       when preview in [:marry, :divorce, :marriage] do
+    case relationship do
+      nil ->
+        "No relationship recorded."
+
+      %{"status" => status, "partner_user_id" => partner} ->
+        "Relationship: #{status} · <@#{partner}>"
+    end
   end
 
   defp format(:shop, result, _user) do
@@ -686,6 +717,10 @@ defmodule ToriEconomy.Discord.Adapter do
   end
 
   defp error_text("ITEM_NOT_OWNED"), do: "That item is not in your inventory."
+  defp error_text("SELF_MARRIAGE"), do: "You cannot propose to yourself."
+  defp error_text("RELATIONSHIP_CONFLICT"), do: "One of you already has an active relationship."
+  defp error_text("NO_PENDING_PROPOSAL"), do: "There is no pending proposal for you."
+  defp error_text("NOT_MARRIED"), do: "You do not have an active marriage."
   defp error_text("ALREADY_OWNED"), do: "You already own this unique item."
   defp error_text("MAX_STACK_REACHED"), do: "Your inventory cannot hold more of this item."
   defp error_text("READ_ONLY"), do: "Tori economy writes are currently disabled."

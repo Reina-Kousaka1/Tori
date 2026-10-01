@@ -19,7 +19,12 @@ defmodule ToriEconomy.Contract do
     "inventory.cosmetic.select",
     "inventory.cosmetic.clear",
     "career.select",
-    "career.practice"
+    "career.practice",
+    "marriage.propose",
+    "marriage.accept",
+    "marriage.decline",
+    "marriage.cancel",
+    "marriage.divorce"
   ]
   @reads [
     "wallet.balance",
@@ -39,7 +44,8 @@ defmodule ToriEconomy.Contract do
     "career.snapshot",
     "inventory.item",
     "wardrobe.list",
-    "marketplace.inspect"
+    "marketplace.inspect",
+    "marriage.snapshot"
   ]
   @operations @mutations ++ @reads
 
@@ -118,6 +124,24 @@ defmodule ToriEconomy.Contract do
 
   defp validate_args("inventory.cosmetics", args), do: keys(args, [])
   defp validate_args("career.snapshot", args), do: keys(args, [])
+
+  defp validate_args("marriage.snapshot", args), do: keys(args, [])
+
+  defp validate_args(operation, args)
+       when operation in [
+              "marriage.accept",
+              "marriage.decline",
+              "marriage.cancel",
+              "marriage.divorce"
+            ],
+       do: keys(args, [])
+
+  defp validate_args("marriage.propose", args) do
+    with :ok <- keys(args, ["target_user_id"]),
+         :ok <- snowflake(args["target_user_id"]) do
+      :ok
+    end
+  end
 
   defp validate_args("career.select", args) do
     with :ok <- keys(args, ["career_code"]),

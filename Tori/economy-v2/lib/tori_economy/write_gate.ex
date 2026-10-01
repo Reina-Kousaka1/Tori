@@ -20,7 +20,12 @@ defmodule ToriEconomy.WriteGate do
                  "inventory.cosmetic.select",
                  "inventory.cosmetic.clear",
                  "career.select",
-                 "career.practice"
+                 "career.practice",
+                 "marriage.propose",
+                 "marriage.accept",
+                 "marriage.decline",
+                 "marriage.cancel",
+                 "marriage.divorce"
                ]
 
   def authorize(operation) when operation in @mutations do

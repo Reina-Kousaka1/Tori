@@ -7,6 +7,7 @@ defmodule ToriEconomy.Dispatcher do
     Equipment,
     Market,
     Marketplace,
+    Marriage,
     Persona,
     Progression,
     Queries,
@@ -40,6 +41,9 @@ defmodule ToriEconomy.Dispatcher do
                "career.practice"
              ] ->
           Progression.execute(request)
+
+        "marriage." <> _ ->
+          Marriage.execute(request)
 
         "activity.perform" ->
           Activity.execute(request)

@@ -67,6 +67,9 @@ defmodule ToriEconomy.Discord.AdapterTest do
              Enum.sort([
                "profile",
                "career",
+               "marry",
+               "divorce",
+               "marriage",
                "tori-profile-preview",
                "tori-shop-preview",
                "tori-wardrobe-preview",
@@ -80,8 +83,9 @@ defmodule ToriEconomy.Discord.AdapterTest do
     assert :ignore == Adapter.handle(%{data: %{name: "marketplace"}})
   end
 
-  test "the main-bot command definitions contain only career and profile" do
-    assert Enum.sort(Enum.map(Commands.definitions(), & &1["name"])) == ["career", "profile"]
+  test "the main-bot command definitions include career, profile and relationships" do
+    assert Enum.sort(Enum.map(Commands.definitions(), & &1["name"])) ==
+             ["career", "divorce", "marriage", "marry", "profile"]
     profile = Enum.find(Commands.definitions(), &(&1["name"] == "profile"))
     assert [%{"name" => "user", "type" => 6, "required" => false}] = profile["options"]
 
@@ -198,9 +202,11 @@ defmodule ToriEconomy.Discord.AdapterTest do
     profile = %{data: %{name: "profile"}}
     component = %{data: %{custom_id: "tori-shop-category"}}
 
-    assert Enum.sort(Adapter.nostrum_commands()) == ["career", "profile"]
+    assert Enum.sort(Adapter.nostrum_commands()) ==
+             ["career", "divorce", "marriage", "marry", "profile"]
     assert Adapter.supported_interaction?(career)
     assert Adapter.supported_interaction?(profile)
+    assert Adapter.supported_interaction?(%{data: %{name: "marry"}})
     refute Adapter.supported_interaction?(%{data: %{name: "daily"}})
     refute Adapter.supported_interaction?(%{data: %{name: "status"}})
     refute Adapter.supported_interaction?(%{data: %{name: "tori-shop-preview"}})

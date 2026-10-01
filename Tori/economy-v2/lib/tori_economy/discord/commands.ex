@@ -12,7 +12,12 @@ defmodule ToriEconomy.Discord.Commands do
       command("profile", "View a Tori economy and career profile.", [
         user_option("user", "Profile to view; defaults to you.", false)
       ]),
-      command("career", "View careers, select one, or complete an activity.", career_options())
+      command("career", "View careers, select one, or complete an activity.", career_options()),
+      command("marry", "Propose, accept or decline a relationship.", marriage_options()),
+      command("divorce", "End your current marriage."),
+      command("marriage", "View a relationship.", [
+        user_option("user", "Person to view; defaults to you.", false)
+      ])
     ]
 
     if shop_enabled?, do: base ++ [shop_command()], else: base
@@ -140,6 +145,15 @@ defmodule ToriEconomy.Discord.Commands do
 
   defp sub(name, description, options \\ []),
     do: %{"name" => name, "description" => description, "type" => 1, "options" => options}
+
+  defp marriage_options do
+    [
+      sub("propose", "Send a proposal.", [user_option("user", "Person to propose to.", true)]),
+      sub("accept", "Accept your pending proposal."),
+      sub("decline", "Decline your pending proposal."),
+      sub("cancel", "Cancel the proposal you sent.")
+    ]
+  end
 
   defp shop_command do
     command("shop", "Browse and buy Tori catalog styles and rotating drops.", [
