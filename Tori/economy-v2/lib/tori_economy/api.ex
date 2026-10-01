@@ -251,6 +251,7 @@ defmodule ToriEconomy.Api do
               "market.product",
               "market.history",
               "shop.rotation",
+              "shop.styles",
               "shop.item",
               "progression.snapshot",
               "career.snapshot",
