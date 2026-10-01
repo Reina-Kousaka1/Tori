@@ -75,6 +75,17 @@ defmodule ToriEconomy.RewriteDomainTest do
     ]
 
     assert Rotation.choose(items, 42, :summer, 3) == Rotation.choose(items, 42, :summer, 3)
+    themes =
+      Enum.map(0..30, fn seed ->
+        {theme, _items} = Rotation.choose(items, seed, :summer, 3)
+        theme
+      end)
+
+    assert Enum.all?(
+             ~w(leopard_girly polka_dot pastel_fantasy everyday_girly sporty_sweet soft_glam),
+             &(&1 in themes)
+           )
+
     {_theme, selected} = Rotation.choose(items, 42, :summer, 3)
     refute Enum.any?(selected, &(&1.id == "b"))
   end

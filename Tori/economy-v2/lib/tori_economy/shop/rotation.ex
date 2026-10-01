@@ -3,7 +3,8 @@ defmodule ToriEconomy.Shop.Rotation do
   alias ToriEconomy.{Catalog, Repo, Sql, WriteGate}
   alias ToriEconomy.Persona.Season
 
-  @themes ~w(y2k cozy denim animal_print balletcore sporty summer christmas)
+  @themes ~w(y2k cozy denim animal_print balletcore sporty summer christmas
+    leopard_girly polka_dot pastel_fantasy everyday_girly sporty_sweet soft_glam)
 
   def current do
     seconds = Sql.query!("SELECT floor(extract(epoch from now()))::bigint").rows |> hd() |> hd()
