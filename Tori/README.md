@@ -1,7 +1,8 @@
-# Discord Music + Moderation Bot (Java 21)
+# Tori: Java/JDA und Docker-Handbuch
 
-Vollständig auf Java umgestellter Anwendungscode mit Gradle (Groovy DSL), JDA 6.5.0,
-Lavalink 4.2.2 mit DAVE und LavaSrc 4.8.3. Der Lavalink-Client bringt intern weiterhin
+Tori ist ein Hybridprojekt aus Java/JDA und Elixir/Nostrum. Java 21/JDA betreibt die bestehenden Java-Systeme, darunter Musik/Lavalink, Moderation, Tickets, Orders und den technischen Presence-Writer. Elixir besitzt nur ausdrücklich zugewiesene Hauptbot-Interaktionen. Dieses Handbuch behandelt Java und Docker; Architektur und Entwicklungsablauf stehen in der [Repository-Übersicht](../README.md) und im [Contributor Guide](../CONTRIBUTING.md).
+
+Die Java-Komponente nutzt Gradle (Groovy DSL), JDA 6.5.0, Lavalink 4.2.2 mit DAVE und LavaSrc 4.8.3. Der Lavalink-Client bringt intern weiterhin
 seine Kotlin-Laufzeit mit; du musst weder Kotlin installieren noch Kotlin-Code bearbeiten.
 Bot-Antworten, Hilfe, Eingabefehler, Moderationsmeldungen und Webhook-Modlogs unterstützen Deutsch,
 Englisch und Niederländisch.
@@ -310,7 +311,7 @@ Tests benötigen keine Tokens und senden keine Nachrichten an Discord.
 Live-Wiedergabe, tatsächliche Spotify-Auflösung und Moderationsaktionen müssen mit deinen Credentials
 auf einem Testserver überprüft werden; ein erfolgreicher Build ersetzt diese Tests nicht.
 
-Keine persistente Queue, keine Warn-Datenbank, kein AutoMod, keine DJ-Rollenverwaltung.
+The Java runtime has no persistent playback queue, warning database, AutoMod enforcement, or DJ role manager. Elixir's separate AutoMod foundation is experimental, disabled by default, and detection-only; it does not take moderation actions.
 Bei längeren Verbindungsstörungen gegebenenfalls `/leave` und `/play` erneut ausführen.
 Wenn Lavalink noch startet, kurz warten und `/play` wiederholen.
 
@@ -381,9 +382,10 @@ mining and woodcutting drops, tool tiers, durability and cooldown rules; `/craft
 `PostgresCurrencyStore` and `PostgresMarketStore`; persona text can decorate shop browsing and playful
 activity results, never balances, prices, cooldowns, permissions or transaction decisions.
 
-The market and progression data were recovered from the existing test/development checkout used as
+The existing Java market and progression data were recovered from the test/development checkout used as
 the source for already-tested economy mechanics; those rules were ported into this Tori repository.
-Cheer, beauty and Sephora-era items are excluded. The shop keeps hourly bounded price movement,
+The Java legacy catalog excludes cheer, beauty and Sephora-era items. The separately gated Elixir V2
+catalog and its current content are documented in [the Economy V2 guide](economy-v2/README.md). The legacy shop keeps hourly bounded price movement,
 recorded price history, five-minute user/guild-bound quotes, finite or unlimited stock, timed discounts
 (an 8% chance every 30 minutes, with 5–30% off for 1–3 hours) and idempotent purchases in PostgreSQL.
 Active discounts are shown in `/shop`. V2 and V3 add economy tables, indexes and cooldown columns only;

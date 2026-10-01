@@ -1,0 +1,46 @@
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: "/Tori"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: mix
+    directory: "/Tori/economy-v2"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker
+    directory: "/Tori"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker
+    directory: "/Tori/economy-v2"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker-compose
+    directory: "/Tori"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5

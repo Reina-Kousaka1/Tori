@@ -13,22 +13,20 @@
 - [ ] Infrastructure / CI
 - [ ] Security
 
-## Runtime / area affected
+## Areas affected
 
 - [ ] Java / JDA
 - [ ] Elixir / Nostrum
 - [ ] PostgreSQL
 - [ ] Discord interactions
-- [ ] Presence
 - [ ] Music / Lavalink
 - [ ] Economy
 - [ ] Shop / Marketplace
-- [ ] Inventory / Equipment
-- [ ] Career
-- [ ] Profile
-- [ ] Relationships
+- [ ] Inventory
+- [ ] Career / Profile
 - [ ] Moderation / Anti-Raid
 - [ ] Orders
+- [ ] Presence
 - [ ] Infrastructure / Docker
 
 ## Testing

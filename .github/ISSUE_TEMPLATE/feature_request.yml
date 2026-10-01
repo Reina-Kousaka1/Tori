@@ -1,0 +1,64 @@
+name: Feature request
+description: Suggest a user-facing improvement or new capability.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the use case and affected area. Do not include tokens, credentials, `.env` contents, or private Discord data.
+
+  - type: textarea
+    id: problem_use_case
+    attributes:
+      label: Problem or use case
+      description: What need or problem would this feature address?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior or outcome you have in mind.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected_domain
+    attributes:
+      label: Affected domain
+      options:
+        - Java / JDA
+        - Elixir / Nostrum
+        - PostgreSQL
+        - Discord interactions
+        - Music / Lavalink
+        - Economy
+        - Shop / Marketplace
+        - Inventory
+        - Career / Profile
+        - Moderation / Anti-Raid
+        - Orders
+        - Presence
+        - Infrastructure / Docker
+        - Other
+        - Not sure
+      default: 14
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What alternatives or workarounds have you considered?
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add relevant context, references, or non-sensitive examples.
+    validations:
+      required: false
