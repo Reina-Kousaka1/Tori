@@ -625,6 +625,39 @@ defmodule ToriEconomy.RewriteDomainTest do
     assert details["result"]["name"] == item["name"]
   end
 
+  test "full catalog purchase respects credits and unique ownership" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,50)", [user])
+
+    assert {:ok, catalog} =
+             Shop.execute(request("shop.styles", user, %{"category" => "fashion", "page" => 0}))
+
+    assert catalog["result"]["total_items"] > 20
+    assert catalog["result"]["type"] == "shop_catalog"
+
+    item_id = "soft_lavender_cardigan"
+    args = %{"item_id" => item_id, "quantity" => 1, "period_key" => "catalog"}
+
+    assert {:ok, insufficient} = Shop.execute(request("shop.purchase", user, args))
+    assert insufficient["error"]["code"] == "INSUFFICIENT_FUNDS"
+    assert [] == Sql.query!("SELECT quantity FROM economy_inventory WHERE user_id=$1", [user]).rows
+
+    Sql.query!("UPDATE economy_accounts SET balance=500 WHERE user_id=$1", [user])
+    assert {:ok, purchase} = Shop.execute(request("shop.purchase", user, args))
+    assert purchase["result"]["balance"] == "290"
+
+    assert {:ok, details} =
+             Shop.execute(
+               request("shop.item", user, %{"item_id" => item_id, "period_key" => "catalog"})
+             )
+
+    assert details["result"]["name"] == "Soft Lavender Cardigan"
+
+    unique = %{"item_id" => "soft_lilac_nail_lacquer", "quantity" => 2, "period_key" => "catalog"}
+    assert {:ok, rejected} = Shop.execute(request("shop.purchase", user, unique))
+    assert rejected["error"]["code"] == "ALREADY_OWNED"
+  end
+
   test "configured career XP is idempotent and does not invent a threshold" do
     user = snowflake()
     source = "test_" <> snowflake()

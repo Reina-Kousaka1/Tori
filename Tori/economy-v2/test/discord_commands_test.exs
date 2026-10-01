@@ -13,6 +13,18 @@ defmodule ToriEconomy.Discord.CommandsTest do
     assert Enum.sort(Enum.map(Commands.definitions(), & &1["name"])) == ["career", "profile"]
   end
 
+  test "shop opt-in uses the same guild registrar without taking Java commands" do
+    definitions = Commands.definitions(true)
+    assert Enum.sort(Enum.map(definitions, & &1["name"])) == ["career", "profile", "shop"]
+
+    shop = Enum.find(definitions, &(&1["name"] == "shop"))
+    assert Enum.map(shop["options"], & &1["name"]) == ["catalog", "browse", "item", "buy"]
+
+    buy = Enum.find(shop["options"], &(&1["name"] == "buy"))
+    assert Enum.find(buy["options"], &(&1["name"] == "item_id"))["required"]
+    assert Enum.find(buy["options"], &(&1["name"] == "quantity"))["type"] == 4
+  end
+
   test "the configured main-bot guild is used and no other commands are registered" do
     {:enabled, config} =
       Config.load(%{

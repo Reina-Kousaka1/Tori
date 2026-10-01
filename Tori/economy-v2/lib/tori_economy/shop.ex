@@ -1,6 +1,7 @@
 defmodule ToriEconomy.Shop do
   @moduledoc "Persisted shop drops, user-facing catalog state and atomic purchases."
   alias ToriEconomy.{Catalog, Idempotency, Inventory, Sql}
+  alias ToriEconomy.Persona.Season
   alias ToriEconomy.Shop.Rotation
 
   @page_size 10
@@ -42,6 +43,52 @@ defmodule ToriEconomy.Shop do
     end
   end
 
+  def execute(%{operation: "shop.styles"} = request) do
+    user = request.context["actor_user_id"]
+    category = Map.get(request.args, "category", "all")
+
+    items =
+      Catalog.list_active()
+      |> Enum.filter(&(category == "all" or &1.category == category))
+      |> Enum.map(&catalog_item/1)
+      |> annotate_items(user)
+
+    total = length(items)
+    pages = max(1, div(total + @page_size - 1, @page_size))
+    page = min(Map.get(request.args, "page", 0), pages - 1)
+
+    {:ok,
+     %{
+       "request_id" => request.request_id,
+       "status" => "ok",
+       "result" => %{
+         "type" => "shop_catalog",
+         "items" => Enum.slice(items, page * @page_size, @page_size),
+         "category" => category,
+         "page" => page,
+         "total_pages" => pages,
+         "total_items" => total
+       }
+     }}
+  end
+
+  def execute(%{operation: "shop.item", args: %{"period_key" => "catalog"}} = request) do
+    item = Catalog.list_active() |> Enum.find(&(&1.id == request.args["item_id"]))
+
+    if item && catalog_available?(item) do
+      [detail] = annotate_items([catalog_item(item)], request.context["actor_user_id"])
+
+      {:ok,
+       %{
+         "request_id" => request.request_id,
+         "status" => "ok",
+         "result" => Map.merge(detail, %{"type" => "shop_item", "period_key" => "catalog"})
+       }}
+    else
+      {:error, "ITEM_NOT_AVAILABLE"}
+    end
+  end
+
   def execute(%{operation: "shop.item"} = request) do
     user = request.context["actor_user_id"]
     requested_period = request.args["period_key"]
@@ -80,6 +127,33 @@ defmodule ToriEconomy.Shop do
         "REQUIREMENT_NOT_MET"
       ]
     )
+  end
+
+  defp catalog_item(item) do
+    %{
+      "item_id" => item.id,
+      "name" => item.name,
+      "description" => item.description,
+      "category" => item.category,
+      "subcategory" => item.subcategory,
+      "rarity" => item.rarity,
+      "unit_price" => Integer.to_string(item.buy_price),
+      "remaining" => nil,
+      "level_requirement" => item.level_requirement,
+      "career_requirement" => item.career_requirement,
+      "career_level_requirement" => item.career_level_requirement,
+      "season" => item.season,
+      "tags" => item.tags,
+      "available" => catalog_available?(item)
+    }
+  end
+
+  defp catalog_available?(item) do
+    current = Season.current()
+
+    item.active and is_nil(Map.get(item.metadata, "stock_limit")) and
+      (is_nil(item.season) or item.season == Atom.to_string(current) or
+         (item.season == "winter" and current == :christmas))
   end
 
   defp annotate_items(items, user) do
@@ -124,18 +198,19 @@ defmodule ToriEconomy.Shop do
     Enum.map(items, fn item ->
       quantity = Map.get(owned, item["item_id"], 0)
       remaining = item["remaining"]
-      available = is_nil(remaining) or String.to_integer(remaining) > 0
+      available = Map.get(item, "available", true) and
+                    (is_nil(remaining) or String.to_integer(remaining) > 0)
 
       career_ok =
         is_nil(item["career_requirement"]) or
-          Map.get(career_levels, item["career_requirement"], 1) >=
+          (Map.get(career_levels, item["career_requirement"]) || 0) >=
             item["career_level_requirement"]
 
       eligible = level >= item["level_requirement"] and career_ok
 
       state =
         cond do
-          not available -> "sold"
+          not available -> "unavailable"
           not eligible -> "locked"
           quantity > 0 -> "owned"
           true -> "available"
@@ -156,7 +231,7 @@ defmodule ToriEconomy.Shop do
     user_id = request.context["actor_user_id"]
     item_id = request.args["item_id"]
     amount = request.args["quantity"]
-    period_key = String.to_integer(request.args["period_key"])
+    period_key = request.args["period_key"]
 
     # Serialize wallet and inventory mutations on the global account row.
     Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1) ON CONFLICT DO NOTHING", [
@@ -167,7 +242,7 @@ defmodule ToriEconomy.Shop do
       Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1 FOR UPDATE", [user_id]).rows
 
     with {:ok, item} <- Catalog.fetch_for_update(item_id),
-         {:ok, unit_price} <- available_item(period_key, item_id, amount),
+         {:ok, unit_price} <- available_item(period_key, item, amount),
          :ok <- requirements(user_id, item, amount),
          total = unit_price * amount,
          true <- balance >= total || {:error, "INSUFFICIENT_FUNDS"},
@@ -189,10 +264,12 @@ defmodule ToriEconomy.Shop do
         [user_id, request.idempotency_key, -total, remaining, request.context["guild_id"]]
       )
 
-      Sql.query!(
-        "UPDATE economy_v2_shop_rotation_items SET sold=sold+$3 WHERE period_key=$1 AND item_id=$2",
-        [period_key, item_id, amount]
-      )
+      if period_key != "catalog" do
+        Sql.query!(
+          "UPDATE economy_v2_shop_rotation_items SET sold=sold+$3 WHERE period_key=$1 AND item_id=$2",
+          [String.to_integer(period_key), item_id, amount]
+        )
+      end
 
       ok(%{
         "type" => "shop_purchase",
@@ -210,7 +287,13 @@ defmodule ToriEconomy.Shop do
     end
   end
 
-  defp available_item(period_key, item_id, amount) do
+  defp available_item("catalog", item, _amount) do
+    if catalog_available?(item) and is_integer(item.buy_price),
+      do: {:ok, item.buy_price},
+      else: {:error, "ITEM_NOT_AVAILABLE"}
+  end
+
+  defp available_item(period_key, item, amount) do
     case Sql.query!(
            """
            SELECT r.unit_price,r.stock_limit,r.sold
@@ -219,7 +302,7 @@ defmodule ToriEconomy.Shop do
            WHERE r.period_key=$1 AND r.item_id=$2 AND s.starts_at<=now() AND s.ends_at>now()
            FOR UPDATE OF r
            """,
-           [period_key, item_id]
+           [String.to_integer(period_key), item.id]
          ).rows do
       [[price, limit, sold]] when is_nil(limit) or sold <= limit - amount -> {:ok, price}
       _ -> {:error, "ITEM_NOT_AVAILABLE"}
@@ -250,7 +333,7 @@ defmodule ToriEconomy.Shop do
       current > (item.max_stack || 9_223_372_036_854_775_807) - amount ->
         {:error, "MAX_STACK_REACHED"}
 
-      not item.stackable and current > 0 ->
+      not item.stackable and (current > 0 or amount > 1) ->
         {:error, "ALREADY_OWNED"}
 
       level < item.level_requirement ->

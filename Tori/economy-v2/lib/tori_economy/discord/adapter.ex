@@ -47,7 +47,15 @@ defmodule ToriEconomy.Discord.Adapter do
 
   def supported_interaction?(interaction) do
     data = field(interaction, :data, %{})
-    field(data, :name, nil) in @nostrum_commands
+    name = field(data, :name, nil)
+
+    name in @nostrum_commands or
+      (shop_enabled?() and (name == "shop" or match?({:component, _, _}, shop_navigation(interaction))))
+  end
+
+  defp shop_enabled? do
+    System.get_env("TORI_NOSTRUM_ENABLED") == "true" and
+      System.get_env("TORI_NOSTRUM_SHOP_ENABLED") == "true"
   end
 
   def component_interaction?(interaction) do
@@ -57,7 +65,9 @@ defmodule ToriEconomy.Discord.Adapter do
 
   def handle(%{data: %{name: name}, id: id, guild_id: guild, channel_id: channel} = interaction)
       when is_binary(name) and is_integer(id) and is_integer(guild) and is_integer(channel) do
-    case Map.get(@commands, name) do
+    preview = if name == "shop" and shop_enabled?(), do: :shop, else: Map.get(@commands, name)
+
+    case preview do
       nil -> :ignore
       :persona -> persona_preview()
       preview -> domain_preview(preview, interaction, id, guild, channel)
@@ -70,7 +80,8 @@ defmodule ToriEconomy.Discord.Adapter do
     case shop_navigation(interaction) do
       {:component, category, page} ->
         options = [%{name: "category", value: category}, %{name: "page", value: page}]
-        data = %{name: "tori-shop-preview", options: [%{name: "browse", options: options}]}
+        name = if(shop_enabled?(), do: "shop", else: "tori-shop-preview")
+        data = %{name: name, options: [%{name: "browse", options: options}]}
         handle(Map.put(interaction, :data, data))
 
       _ ->
@@ -106,7 +117,7 @@ defmodule ToriEconomy.Discord.Adapter do
         end
 
       _ ->
-        if field(data, :name, nil) == "tori-shop-preview" do
+        if field(data, :name, nil) in ["shop", "tori-shop-preview"] do
           {subcommand, options} = command_options(interaction)
 
           if subcommand == "browse" do
@@ -161,10 +172,13 @@ defmodule ToriEconomy.Discord.Adapter do
 
   defp operation_for(:profile, _subcommand, _options), do: {:ok, "profile.snapshot", %{}}
 
+  defp operation_for(:shop, "catalog", options),
+    do: {:ok, "shop.styles", %{"category" => value(options, "category") || "all", "page" => integer(options, "page", 0)}}
+
   defp operation_for(:shop, "item", options),
     do:
       {:ok, "shop.item",
-       %{"item_id" => value(options, "item_id"), "period_key" => value(options, "period_key")}}
+       %{"item_id" => value(options, "item_id"), "period_key" => value(options, "period_key") || "catalog"}}
 
   defp operation_for(:shop, "buy", options),
     do:
@@ -259,6 +273,21 @@ defmodule ToriEconomy.Discord.Adapter do
 
   defp operation_for(:activities, _subcommand, options),
     do: {:ok, "activity.perform", %{"activity" => value(options, "activity")}}
+
+  defp render_preview(:shop, _response, %{"type" => "shop_catalog"} = result, _user) do
+    lines =
+      Enum.map(result["items"], fn item ->
+        "#{rarity_mark(item["rarity"])} `#{item["item_id"]}` #{item["name"]} · #{item["unit_price"]} Credits · #{item["state"]}"
+      end)
+
+    [
+      "Catalog · #{result["category"]} · page #{result["page"] + 1}/#{result["total_pages"]}",
+      "Use /shop item or /shop buy with the item ID.",
+      if(lines == [], do: "No items in this category.", else: Enum.join(lines, "\n"))
+    ]
+    |> Enum.join("\n")
+    |> clip()
+  end
 
   defp render_preview(:shop, _response, %{"type" => "shop_item"} = result, _user),
     do: format_shop_item(result)
@@ -443,7 +472,7 @@ defmodule ToriEconomy.Discord.Adapter do
         seasonal = if item["season"], do: " · #{item["season"]}", else: ""
         ownership = if item["state"] == "owned", do: " ×#{item["owned_quantity"]}", else: ""
 
-        "#{rarity_mark(item["rarity"])} #{item["name"]} · #{item["unit_price"]} Credits · #{item["state"]}#{ownership}#{seasonal}"
+        "#{rarity_mark(item["rarity"])} `#{item["item_id"]}` #{item["name"]} · #{item["unit_price"]} Credits · #{item["state"]}#{ownership}#{seasonal}"
       end)
 
     refresh = div(String.to_integer(result["refresh_in_seconds"]), 60)
@@ -451,6 +480,7 @@ defmodule ToriEconomy.Discord.Adapter do
     [
       "#{String.replace(result["theme"], "_", " ")} drop · #{result["season"]} · drop `#{result["period_key"]}`",
       "Refreshes in about #{refresh} min · page #{result["page"] + 1}/#{result["total_pages"]}",
+      "Use /shop item or /shop buy with the item ID and drop period.",
       if(items == [], do: "No items in this category.", else: Enum.join(items, "\n"))
     ]
     |> Enum.join("\n")
@@ -613,7 +643,8 @@ defmodule ToriEconomy.Discord.Adapter do
     [
       "#{rarity_mark(item["rarity"])} #{item["name"]} · #{item["rarity"]}",
       item["description"],
-      "Price: #{item["unit_price"]} Credits",
+      "Price: #{item["unit_price"]} Credits · ID: `#{item["item_id"]}`",
+      "Use /shop buy with this ID and period #{item["period_key"]}.",
       requirement,
       season
     ]
@@ -655,6 +686,10 @@ defmodule ToriEconomy.Discord.Adapter do
   end
 
   defp error_text("ITEM_NOT_OWNED"), do: "That item is not in your inventory."
+  defp error_text("ALREADY_OWNED"), do: "You already own this unique item."
+  defp error_text("MAX_STACK_REACHED"), do: "Your inventory cannot hold more of this item."
+  defp error_text("READ_ONLY"), do: "Tori economy writes are currently disabled."
+  defp error_text("INVALID_INPUT"), do: "Check the item ID, quantity and period."
   defp error_text("ITEM_NOT_AVAILABLE"), do: "That item or listing is no longer available."
   defp error_text("COOLDOWN_ACTIVE"), do: "That action is still on cooldown."
   defp error_text("INSUFFICIENT_FUNDS"), do: "You do not have enough Credits."

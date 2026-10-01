@@ -36,10 +36,18 @@ public final class GeneralBot extends CommandListener {
         "fish", "mine", "chop", "craft", "repair", "opencrate", "market", "iteminfo", "pricehistory");
     private static Set<String> commandNames() {
         var names = new HashSet<>(ECONOMY_COMMANDS);
+        if (shopOwnedByNostrum()) names.remove("shop");
         names.addAll(Set.of("prefix", "language", "help", "ping", "stats", "status",
             "restart", "shutdown", "uptime", "avatar"));
         return Set.copyOf(names);
     }
+    private static boolean shopOwnedByNostrum() { return shopOwnedByNostrum(System.getenv()); }
+
+    static boolean shopOwnedByNostrum(Map<String, String> env) {
+        return "true".equalsIgnoreCase(env.get("TORI_NOSTRUM_ENABLED"))
+            && "true".equalsIgnoreCase(env.get("TORI_NOSTRUM_SHOP_ENABLED"));
+    }
+
     private final StatusRotation rotation;
     private final long configuredOwnerId;
     private final Runnable restart;
@@ -135,7 +143,7 @@ public final class GeneralBot extends CommandListener {
         else manager.setPresence(status, activity);
     }
     public static List<CommandData> commands() {
-        return LocalizedCommands.apply(List.of(
+        var definitions = LocalizedCommands.apply(List.of(
             Commands.slash("language", "Show or set the server language")
                 .addOptions(new OptionData(OptionType.STRING, "code", "Language")
                     .addChoice("Deutsch", "de").addChoice("English", "en").addChoice("Nederlands", "nl")),
@@ -236,6 +244,9 @@ public final class GeneralBot extends CommandListener {
                     new OptionData(OptionType.INTEGER, "ttl_seconds", "Optional activity lifetime in seconds")
                         .setRequiredRange(60, 604800))
         ));
+        return shopOwnedByNostrum()
+            ? definitions.stream().filter(command -> !command.getName().equals("shop")).toList()
+            : definitions;
     }
     @Override protected String handle(CommandContext event, Language language) {
         if (ECONOMY_COMMANDS.contains(event.getName())) return economy(event, language);
@@ -873,7 +884,7 @@ public final class GeneralBot extends CommandListener {
     }
     @Override public void onButtonInteraction(ButtonInteractionEvent event) {
         String id = event.getComponentId();
-        if (!id.startsWith("tori:s:")) return;
+        if (!id.startsWith("tori:s:") || shopOwnedByNostrum()) return;
         String[] parts = id.split(":", -1);
         if (event.getGuild() == null || parts.length != 5 || !parts[2].equals(event.getUser().getId())
             || !parts[3].matches("all|[a-z0-9_-]{1,64}") || !parts[4].matches("[0-9]{1,5}")) {

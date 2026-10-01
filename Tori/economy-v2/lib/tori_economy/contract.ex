@@ -30,6 +30,7 @@ defmodule ToriEconomy.Contract do
     "market.product",
     "market.history",
     "shop.rotation",
+    "shop.styles",
     "progression.snapshot",
     "marketplace.browse",
     "inventory.effects",
@@ -93,7 +94,7 @@ defmodule ToriEconomy.Contract do
 
   defp validate_args("profile.snapshot", args), do: keys(args, [])
 
-  defp validate_args("shop.rotation", args) do
+  defp validate_args(operation, args) when operation in ["shop.rotation", "shop.styles"] do
     with :ok <- keys(args, ["category", "page"]),
          category when is_binary(category) <- Map.get(args, "category", "all"),
          true <- category == "all" or Regex.match?(~r/^[a-z0-9_-]{1,64}$/, category),
@@ -108,7 +109,7 @@ defmodule ToriEconomy.Contract do
     with :ok <- keys(args, ["item_id", "period_key"]),
          :ok <- item_id(args["item_id"]),
          key when is_binary(key) <- args["period_key"],
-         true <- Regex.match?(~r/^[0-9]{1,15}$/, key) do
+         true <- key == "catalog" or Regex.match?(~r/^[0-9]{1,15}$/, key) do
       :ok
     else
       _ -> {:error, "INVALID_INPUT"}
@@ -208,7 +209,7 @@ defmodule ToriEconomy.Contract do
          :ok <- item_id(args["item_id"]),
          quantity when is_integer(quantity) and quantity in 1..100 <- args["quantity"],
          key when is_binary(key) <- args["period_key"],
-         true <- Regex.match?(~r/^[0-9]{1,15}$/, key) do
+         true <- key == "catalog" or Regex.match?(~r/^[0-9]{1,15}$/, key) do
       :ok
     else
       _ -> {:error, "INVALID_INPUT"}

@@ -1,5 +1,5 @@
 defmodule ToriEconomy.Discord.Commands do
-  @moduledoc "Registers only the /career and /profile commands for the configured Tori guild."
+  @moduledoc "Registers Elixir-owned commands for the configured Tori guild."
   use GenServer
   require Logger
 
@@ -7,13 +7,20 @@ defmodule ToriEconomy.Discord.Commands do
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-  def definitions do
-    [
+  def definitions(shop_enabled? \\ shop_enabled?()) do
+    base = [
       command("profile", "View a Tori economy and career profile.", [
         user_option("user", "Profile to view; defaults to you.", false)
       ]),
       command("career", "View careers, select one, or complete an activity.", career_options())
     ]
+
+    if shop_enabled?, do: base ++ [shop_command()], else: base
+  end
+
+  defp shop_enabled? do
+    System.get_env("TORI_NOSTRUM_ENABLED") == "true" and
+      System.get_env("TORI_NOSTRUM_SHOP_ENABLED") == "true"
   end
 
   @doc false
@@ -45,7 +52,7 @@ defmodule ToriEconomy.Discord.Commands do
     token = Application.fetch_env!(:nostrum, :token)
     guild_id = Keyword.fetch!(opts, :guild_id)
     :ok = register_commands(token, guild_id)
-    Logger.info("Registered Elixir-owned /career and /profile in the configured Tori guild")
+    Logger.info("Registered Elixir-owned commands in the configured Tori guild")
     {:ok, %{guild_id: guild_id}}
   end
 
@@ -133,6 +140,38 @@ defmodule ToriEconomy.Discord.Commands do
 
   defp sub(name, description, options \\ []),
     do: %{"name" => name, "description" => description, "type" => 1, "options" => options}
+
+  defp shop_command do
+    command("shop", "Browse and buy Tori catalog styles and rotating drops.", [
+      sub("catalog", "Browse all currently available catalog styles.", [
+        string("category", "Item category", false),
+        integer("page", "Page number, starting at zero", false, 0, 1000)
+      ]),
+      sub("browse", "Browse the current featured drop.", [
+        string("category", "Item category", false),
+        integer("page", "Page number, starting at zero", false, 0, 1000)
+      ]),
+      sub("item", "Inspect an item and its current price.", [
+        string("item_id", "Catalog item ID", true),
+        string("period_key", "Featured drop period; omit for catalog price", false)
+      ]),
+      sub("buy", "Buy an item from the catalog or a featured drop.", [
+        string("item_id", "Catalog item ID", true),
+        integer("quantity", "Quantity", false, 1, 100),
+        string("period_key", "Featured drop period; omit for catalog price", false)
+      ])
+    ])
+  end
+
+  defp integer(name, description, required, minimum, maximum),
+    do: %{
+      "name" => name,
+      "description" => description,
+      "type" => 4,
+      "required" => required,
+      "min_value" => minimum,
+      "max_value" => maximum
+    }
 
   defp career_options do
     [

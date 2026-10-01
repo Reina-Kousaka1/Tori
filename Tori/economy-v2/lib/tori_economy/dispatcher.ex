@@ -19,7 +19,7 @@ defmodule ToriEconomy.Dispatcher do
         operation when operation in ["market.product", "market.history"] ->
           Market.execute(request)
 
-        operation when operation in ["shop.rotation", "shop.item", "shop.purchase"] ->
+        operation when operation in ["shop.rotation", "shop.styles", "shop.item", "shop.purchase"] ->
           Shop.execute(request)
 
         operation
