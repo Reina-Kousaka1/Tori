@@ -1,6 +1,7 @@
 defmodule ToriEconomy.Discord.EconomyCommandsTest do
   use ExUnit.Case, async: false
   alias ToriEconomy.{Sql, TestSchema}
+  alias ToriEconomy.Shop.Rotation
 
   @url System.get_env("TORI_ECONOMY_TEST_DATABASE_URL")
   @moduletag skip: if(is_nil(@url), do: "requires explicit isolated *_test database", else: false)
@@ -11,9 +12,17 @@ defmodule ToriEconomy.Discord.EconomyCommandsTest do
   end
 
   setup do
-    names = ~w(TORI_ECONOMY_WRITE_ENABLED TORI_ECONOMY_WRITE_MODE TORI_ECONOMY_DATABASE_URL TORI_NOSTRUM_ENABLED TORI_NOSTRUM_SHOP_ENABLED)
+    names =
+      ~w(
+        TORI_ECONOMY_WRITE_ENABLED TORI_ECONOMY_WRITE_MODE TORI_ECONOMY_DATABASE_URL
+        TORI_NOSTRUM_ENABLED TORI_NOSTRUM_SHOP_ENABLED TORI_SHOP_ROTATION_HOURS
+      )
     saved = Map.new(names, fn name -> {name, System.get_env(name)} end)
-    on_exit(fn -> Enum.each(saved, fn {name, value} -> restore(name, value) end) end)
+
+    on_exit(fn ->
+      Enum.each(saved, fn {name, value} -> restore(name, value) end)
+    end)
+
     :ok
   end
 
@@ -127,6 +136,21 @@ defmodule ToriEconomy.Discord.EconomyCommandsTest do
     assert bought =~ "Soft Lavender Cardigan"
     assert {:ok, _replayed} = ToriEconomy.Discord.Adapter.handle(buy)
 
+    item =
+      Map.put(base, :data, %{
+        name: "shop",
+        options: [
+          %{
+            name: "item",
+            options: [%{name: "item_id", value: item_id}]
+          }
+        ]
+      })
+
+    assert {:ok, details} = ToriEconomy.Discord.Adapter.handle(item)
+    assert details =~ "Owned ×1"
+    assert details =~ "Price: 210 Credits"
+
     assert [[1]] =
              Sql.query!(
                "SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id=$2",
@@ -162,6 +186,111 @@ defmodule ToriEconomy.Discord.EconomyCommandsTest do
     profile = Map.put(base, :data, %{name: "profile"})
     assert {:ok, profile_text} = ToriEconomy.Discord.Adapter.handle(profile)
     assert profile_text =~ "outerwear: Soft Lavender Cardigan"
+  end
+
+  test "the main-bot rotating shop publishes, selects and buys a persisted drop item" do
+    System.put_env("TORI_NOSTRUM_ENABLED", "true")
+    System.put_env("TORI_NOSTRUM_SHOP_ENABLED", "true")
+    System.put_env("TORI_ECONOMY_WRITE_ENABLED", "true")
+    System.put_env("TORI_ECONOMY_WRITE_MODE", "test")
+    System.put_env("TORI_ECONOMY_DATABASE_URL", @url)
+    System.put_env("TORI_SHOP_ROTATION_HOURS", "24")
+
+    user = snowflake()
+    item_id = "soft_lavender_cardigan"
+    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,1000)", [user])
+
+    assert {:ok, _initial_rotation} = Rotation.current()
+    [[period]] = Sql.query!("SELECT floor(extract(epoch from now())/86400)::bigint").rows
+
+    Sql.query!(
+      """
+      INSERT INTO economy_v2_shop_rotation_items(period_key,item_id,position,unit_price,stock_limit)
+      SELECT $1,$2,coalesce(max(position)+1,0),c.buy_price,NULL
+      FROM economy_v2_catalog_items c
+      LEFT JOIN economy_v2_shop_rotation_items r ON r.period_key=$1
+      WHERE c.item_id=$2
+      GROUP BY c.buy_price
+      ON CONFLICT (period_key,item_id) DO NOTHING
+      """,
+      [period, item_id]
+    )
+
+    assert {:ok, rotation} = Rotation.current()
+    rotated_items = Enum.filter(rotation["items"], &(&1["category"] == "fashion"))
+    item_position = Enum.find_index(rotated_items, &(&1["item_id"] == item_id))
+    assert is_integer(item_position)
+    page = div(item_position, 8)
+    base = %{
+      id: String.to_integer(snowflake()),
+      guild_id: 234_567_890_123_456_789,
+      channel_id: 345_678_901_234_567_890,
+      user: %{id: String.to_integer(user)}
+    }
+
+    browse =
+      Map.put(base, :data, %{
+        name: "shop",
+        options: [
+          %{
+            name: "browse",
+            options: [%{name: "category", value: "fashion"}, %{name: "page", value: page}]
+          }
+        ]
+      })
+
+    assert ToriEconomy.Discord.Adapter.supported_interaction?(browse)
+    assert {:ok, browsing} = ToriEconomy.Discord.Adapter.handle(browse)
+    assert browsing =~ "drop `#{rotation["period_key"]}`"
+    assert browsing =~ "`#{item_id}`"
+
+    details =
+      %{base | id: String.to_integer(snowflake())}
+      |> Map.put(:data, %{
+        name: "shop",
+        options: [
+          %{
+            name: "item",
+            options: [
+              %{name: "item_id", value: item_id},
+              %{name: "period_key", value: rotation["period_key"]}
+            ]
+          }
+        ]
+      })
+
+    assert {:ok, item_details} = ToriEconomy.Discord.Adapter.handle(details)
+    assert item_details =~ "Soft Lavender Cardigan"
+    assert item_details =~ "Price: 210 Credits"
+
+    buy =
+      %{base | id: String.to_integer(snowflake())}
+      |> Map.put(:data, %{
+        name: "shop",
+        options: [
+          %{
+            name: "buy",
+            options: [
+              %{name: "item_id", value: item_id},
+              %{name: "period_key", value: rotation["period_key"]}
+            ]
+          }
+        ]
+      })
+
+    assert {:ok, purchase} = ToriEconomy.Discord.Adapter.handle(buy)
+    assert purchase =~ "Soft Lavender Cardigan"
+    assert [[1]] =
+             Sql.query!(
+               "SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id=$2",
+               [user, item_id]
+             ).rows
+
+    assert [[1]] =
+             Sql.query!(
+               "SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1 AND leg='shop_debit'",
+               ["discord-interaction:#{buy.id}"]
+             ).rows
   end
 
   test "the main-bot marketplace lists and buys through shared inventory and ledger" do

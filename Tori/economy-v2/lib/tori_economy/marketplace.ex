@@ -96,7 +96,7 @@ defmodule ToriEconomy.Marketplace do
          "listings" => listings,
          "category" => category,
          "page" => page,
-         "page_size" => 20,
+         "page_size" => @page_size,
          "total_items" => total,
          "total_pages" => total_pages
        }

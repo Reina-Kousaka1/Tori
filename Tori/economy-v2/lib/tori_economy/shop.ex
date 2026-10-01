@@ -330,11 +330,14 @@ defmodule ToriEconomy.Shop do
       amount < 1 or amount > 100 ->
         {:error, "INVALID_QUANTITY"}
 
+      not item.stackable and amount > 1 ->
+        {:error, "INVALID_QUANTITY"}
+
+      not item.stackable and current > 0 ->
+        {:error, "ALREADY_OWNED"}
+
       current > (item.max_stack || 9_223_372_036_854_775_807) - amount ->
         {:error, "MAX_STACK_REACHED"}
-
-      not item.stackable and (current > 0 or amount > 1) ->
-        {:error, "ALREADY_OWNED"}
 
       level < item.level_requirement ->
         {:error, "REQUIREMENT_NOT_MET"}

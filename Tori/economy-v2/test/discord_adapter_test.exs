@@ -60,38 +60,29 @@ defmodule ToriEconomy.Discord.AdapterTest do
              })
   end
 
-  test "legacy adapter helpers remain separate from main-bot command ownership" do
-    commands = Adapter.preview_commands()
+  test "adapter exposes only main-bot commands and isolates the optional shop owner" do
+    base_commands = Enum.sort(~w(career divorce marriage marketplace marry profile wardrobe))
+    assert Enum.sort(Adapter.main_bot_commands(false)) == base_commands
+    assert Enum.sort(Adapter.main_bot_commands(true)) == Enum.sort(base_commands ++ ["shop"])
+    assert Enum.sort(Adapter.nostrum_commands()) == base_commands
 
-    assert Enum.sort(commands) ==
-             Enum.sort([
-               "profile",
-               "career",
-               "marry",
-               "divorce",
-               "marriage",
-               "wardrobe",
-               "marketplace",
-               "tori-profile-preview",
-               "tori-shop-preview",
-               "tori-wardrobe-preview",
-               "tori-marketplace-preview",
-               "tori-career-preview",
-               "tori-persona-preview",
-               "tori-consumable-preview",
-               "tori-activity-preview"
-             ])
+    jda_owned = ~w(buy equip inventory market sell shop)
+    assert [] == Enum.filter(base_commands, &(&1 in jda_owned))
+    assert Enum.filter(Adapter.main_bot_commands(true), &(&1 in jda_owned)) == ["shop"]
 
     assert :ignore == Adapter.handle(%{data: %{name: "marketplace"}})
+    assert :ignore == Adapter.handle(%{data: %{name: "tori-shop-preview"}})
   end
 
   test "the main-bot command definitions include career, profile and relationships" do
-    assert Enum.sort(Enum.map(Commands.definitions(), & &1["name"])) ==
-             ["career", "divorce", "marriage", "marketplace", "marry", "profile", "wardrobe"]
-    profile = Enum.find(Commands.definitions(), &(&1["name"] == "profile"))
+    definitions = Commands.definitions(false)
+
+    assert Enum.sort(Enum.map(definitions, & &1["name"])) ==
+             Enum.sort(~w(career divorce marriage marketplace marry profile wardrobe))
+    profile = Enum.find(definitions, &(&1["name"] == "profile"))
     assert [%{"name" => "user", "type" => 6, "required" => false}] = profile["options"]
 
-    career = Enum.find(Commands.definitions(), &(&1["name"] == "career"))
+    career = Enum.find(definitions, &(&1["name"] == "career"))
     assert [%{"name" => "status"}, %{"name" => "select"}, activity, %{"name" => "practice"}] =
              career["options"]
 
@@ -170,7 +161,7 @@ defmodule ToriEconomy.Discord.AdapterTest do
   test "shop navigation reads the category/page and component IDs stay scoped to shop pages" do
     command = %{
       data: %{
-        name: "tori-shop-preview",
+        name: "shop",
         options: [
           %{
             name: "browse",
@@ -199,13 +190,51 @@ defmodule ToriEconomy.Discord.AdapterTest do
              })
   end
 
+  test "shop item details do not present sold or unavailable items as buyable" do
+    response = %{
+      "status" => "ok",
+      "result" => %{
+        "type" => "shop_item",
+        "item_id" => "soft_lavender_cardigan",
+        "name" => "Soft Lavender Cardigan",
+        "description" => "Soft cardigan.",
+        "rarity" => "uncommon",
+        "unit_price" => "210",
+        "period_key" => "20260930",
+        "eligible" => true,
+        "state" => "unavailable",
+        "available" => false,
+        "remaining" => "0",
+        "owned_quantity" => "0",
+        "level_requirement" => 1,
+        "career_requirement" => nil,
+        "career_level_requirement" => 1,
+        "season" => nil
+      }
+    }
+
+    assert {:ok, sold} = Adapter.render_result(:shop, response, "123")
+    assert sold =~ "Sold out"
+    refute sold =~ "Available"
+
+    locked = put_in(response, ["result", "state"], "locked")
+    locked = put_in(locked, ["result", "eligible"], false)
+    locked = put_in(locked, ["result", "remaining"], nil)
+    locked = put_in(locked, ["result", "career_requirement"], "ballet")
+    locked = put_in(locked, ["result", "career_level_requirement"], 2)
+
+    assert {:ok, requirement} = Adapter.render_result(:shop, locked, "123")
+    assert requirement =~ "Locked"
+    assert requirement =~ "ballet level 2"
+  end
+
   test "Nostrum acknowledges only Elixir-owned main-bot commands" do
     career = %{data: %{name: "career"}}
     profile = %{data: %{name: "profile"}}
     component = %{data: %{custom_id: "tori-shop-category"}}
 
     assert Enum.sort(Adapter.nostrum_commands()) ==
-             ["career", "divorce", "marriage", "marry", "profile"]
+             Enum.sort(~w(career divorce marriage marketplace marry profile wardrobe))
     assert Adapter.supported_interaction?(career)
     assert Adapter.supported_interaction?(profile)
     assert Adapter.supported_interaction?(%{data: %{name: "marry"}})
@@ -215,6 +244,9 @@ defmodule ToriEconomy.Discord.AdapterTest do
     refute Adapter.supported_interaction?(component)
     assert NostrumConsumer.acknowledgement(career) == %{type: 5, data: %{flags: 64}}
     assert NostrumConsumer.acknowledgement(profile) == %{type: 5, data: %{flags: 64}}
+    refute Adapter.supported_interaction?(%{data: %{name: "tori-wardrobe-preview"}})
+    assert Adapter.supported_interaction?(%{data: %{name: "wardrobe"}})
+    assert Adapter.supported_interaction?(%{data: %{name: "marketplace"}})
   end
 
   test "consumer uses Nostrum's supervised start_link/1 child contract" do

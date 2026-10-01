@@ -9,15 +9,7 @@ defmodule ToriEconomy.Discord.Adapter do
     "divorce" => :divorce,
     "marriage" => :marriage,
     "wardrobe" => :wardrobe,
-    "marketplace" => :marketplace,
-    "tori-profile-preview" => :profile,
-    "tori-shop-preview" => :shop,
-    "tori-wardrobe-preview" => :wardrobe,
-    "tori-marketplace-preview" => :marketplace,
-    "tori-career-preview" => :career,
-    "tori-persona-preview" => :persona,
-    "tori-consumable-preview" => :consumables,
-    "tori-activity-preview" => :activities
+    "marketplace" => :marketplace
   }
   @nostrum_commands ~w(profile career marry divorce marriage wardrobe marketplace)
   @shop_categories [
@@ -39,7 +31,10 @@ defmodule ToriEconomy.Discord.Adapter do
     marketplace.cancel career.select career.practice inventory.consume activity.perform
     marriage.propose marriage.accept marriage.decline marriage.cancel marriage.divorce)
 
-  def preview_commands, do: Map.keys(@commands)
+  def main_bot_commands(include_shop? \\ shop_enabled?()) do
+    if include_shop?, do: @nostrum_commands ++ ["shop"], else: @nostrum_commands
+  end
+
   def nostrum_commands, do: @nostrum_commands
   def shop_categories, do: @shop_categories
 
@@ -86,8 +81,7 @@ defmodule ToriEconomy.Discord.Adapter do
     case shop_navigation(interaction) do
       {:component, category, page} ->
         options = [%{name: "category", value: category}, %{name: "page", value: page}]
-        name = if(shop_enabled?(), do: "shop", else: "tori-shop-preview")
-        data = %{name: name, options: [%{name: "browse", options: options}]}
+        data = %{name: "shop", options: [%{name: "browse", options: options}]}
         handle(Map.put(interaction, :data, data))
 
       _ ->
@@ -123,7 +117,7 @@ defmodule ToriEconomy.Discord.Adapter do
         end
 
       _ ->
-        if field(data, :name, nil) in ["shop", "tori-shop-preview"] do
+        if field(data, :name, nil) == "shop" do
           {subcommand, options} = command_options(interaction)
 
           if subcommand == "browse" do
@@ -191,7 +185,7 @@ defmodule ToriEconomy.Discord.Adapter do
       {:ok, "shop.purchase",
        %{
          "item_id" => value(options, "item_id"),
-         "period_key" => value(options, "period_key"),
+         "period_key" => value(options, "period_key") || "catalog",
          "quantity" => integer(options, "quantity", 1)
        }}
 
@@ -652,8 +646,22 @@ defmodule ToriEconomy.Discord.Adapter do
   defp format(_, result, _user), do: "Completed: #{result["type"] || "success"}."
 
   defp format_shop_item(item) do
+    owned_quantity = String.to_integer(item["owned_quantity"] || "0")
+
     requirement =
       cond do
+        item["state"] == "unavailable" and owned_quantity > 0 and item["remaining"] == "0" ->
+          "Owned ×#{owned_quantity} · sold out in this drop"
+
+        item["state"] == "unavailable" and owned_quantity > 0 ->
+          "Owned ×#{owned_quantity} · currently unavailable"
+
+        item["state"] == "unavailable" and item["remaining"] == "0" ->
+          "Sold out"
+
+        item["state"] == "unavailable" ->
+          "Currently unavailable"
+
         not item["eligible"] ->
           "Locked · requires level #{item["level_requirement"]}" <>
             if(item["career_requirement"],
@@ -664,11 +672,11 @@ defmodule ToriEconomy.Discord.Adapter do
         item["state"] == "owned" ->
           "Owned ×#{item["owned_quantity"]}"
 
-        item["state"] == "sold" ->
-          "Sold out"
-
         true ->
-          "Available"
+          if(owned_quantity > 0,
+            do: "Owned ×#{owned_quantity}",
+            else: "Available"
+          )
       end
 
     season = if item["season"], do: "Seasonal · #{item["season"]}", else: nil

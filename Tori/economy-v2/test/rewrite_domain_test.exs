@@ -794,8 +794,20 @@ defmodule ToriEconomy.RewriteDomainTest do
     assert details["result"]["name"] == "Soft Lavender Cardigan"
 
     unique = %{"item_id" => "soft_lilac_nail_lacquer", "quantity" => 2, "period_key" => "catalog"}
-    assert {:ok, rejected} = Shop.execute(request("shop.purchase", user, unique))
-    assert rejected["error"]["code"] == "ALREADY_OWNED"
+    assert {:ok, rejected_quantity} = Shop.execute(request("shop.purchase", user, unique))
+    assert rejected_quantity["error"]["code"] == "INVALID_QUANTITY"
+
+    unique_one = %{unique | "quantity" => 1}
+    assert {:ok, unique_purchase} = Shop.execute(request("shop.purchase", user, unique_one))
+    assert unique_purchase["status"] == "ok"
+    assert {:ok, rejected_duplicate} = Shop.execute(request("shop.purchase", user, unique_one))
+    assert rejected_duplicate["error"]["code"] == "ALREADY_OWNED"
+
+    assert [[1]] =
+             Sql.query!(
+               "SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='soft_lilac_nail_lacquer'",
+               [user]
+             ).rows
   end
 
   test "catalog purchase accepts the required career when other careers also have progress" do
@@ -831,6 +843,44 @@ defmodule ToriEconomy.RewriteDomainTest do
                "SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id=$2",
                [user, item_id]
              ).rows
+  end
+
+  test "shop purchase rejects an expired rotation without touching wallet or inventory" do
+    user = snowflake()
+    item_id = "soft_lavender_cardigan"
+    period_key = -System.system_time(:microsecond)
+    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,500)", [user])
+
+    Sql.query!(
+      """
+      INSERT INTO economy_v2_shop_rotations(period_key,theme,season,seed,starts_at,ends_at)
+      VALUES ($1,'test','summer',$1,now()-interval '2 hours',now()-interval '1 hour')
+      """,
+      [period_key]
+    )
+
+    Sql.query!(
+      """
+      INSERT INTO economy_v2_shop_rotation_items(period_key,item_id,position,unit_price,stock_limit)
+      VALUES ($1,$2,0,210,1)
+      """,
+      [period_key, item_id]
+    )
+
+    assert {:ok, unavailable} =
+             Shop.execute(
+               request("shop.purchase", user, %{
+                 "item_id" => item_id,
+                 "quantity" => 1,
+                 "period_key" => Integer.to_string(period_key)
+               })
+             )
+
+    assert unavailable["error"]["code"] == "ITEM_NOT_AVAILABLE"
+    assert [[500]] =
+             Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [user]).rows
+
+    assert [] = Sql.query!("SELECT item_id FROM economy_inventory WHERE user_id=$1", [user]).rows
   end
 
   test "configured career XP is idempotent and does not invent a threshold" do
@@ -895,6 +945,7 @@ defmodule ToriEconomy.RewriteDomainTest do
 
     assert first["result"]["total_items"] == 13
     assert first["result"]["total_pages"] == 2
+    assert first["result"]["page_size"] == 8
     assert length(first["result"]["listings"]) == 8
     assert length(second["result"]["listings"]) == 5
 
@@ -992,6 +1043,77 @@ defmodule ToriEconomy.RewriteDomainTest do
              Sql.query!(
                "SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=$1",
                [purchase.idempotency_key]
+             ).rows
+  end
+
+  test "concurrent marketplace buyers cannot both settle the same escrow" do
+    seller = snowflake()
+    buyers = [snowflake(), snowflake()]
+
+    Sql.query!(
+      "INSERT INTO economy_accounts(user_id,balance) VALUES ($1,0),($2,500),($3,500)",
+      [seller | buyers]
+    )
+
+    Sql.query!(
+      "INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'pink_lace_cami',1)",
+      [seller]
+    )
+
+    assert {:ok, %{"result" => %{"listing_id" => listing_id}}} =
+             Marketplace.execute(
+               request("marketplace.list", seller, %{
+                 "item_id" => "pink_lace_cami",
+                 "quantity" => 1,
+                 "ask_price" => "90",
+                 "expires_hours" => 24
+               })
+             )
+
+    buy_requests =
+      Enum.map(buyers, fn buyer ->
+        request("marketplace.buy", buyer, %{"listing_id" => listing_id})
+      end)
+
+    results =
+      buy_requests
+      |> Enum.map(fn buy_request -> Task.async(fn -> Marketplace.execute(buy_request) end) end)
+      |> Enum.map(&Task.await(&1, 10_000))
+
+    assert Enum.count(results, fn {:ok, %{"status" => "ok"}} -> true; _ -> false end) == 1
+    assert Enum.count(results, fn
+             {:ok, %{"error" => %{"code" => "ITEM_NOT_AVAILABLE"}}} -> true
+             _ -> false
+           end) == 1
+
+    assert [[90]] = Sql.query!("SELECT balance FROM economy_accounts WHERE user_id=$1", [seller]).rows
+
+    buyer_balances =
+      Sql.query!(
+        "SELECT balance FROM economy_accounts WHERE user_id=ANY($1::text[]) ORDER BY balance",
+        [buyers]
+      ).rows
+      |> Enum.map(&hd/1)
+
+    assert [410, 500] == buyer_balances
+
+    assert [[1]] =
+             Sql.query!(
+               "SELECT count(*) FROM economy_inventory WHERE user_id=ANY($1::text[]) AND item_id='pink_lace_cami' AND quantity=1",
+               [buyers]
+             ).rows
+
+    successful_request_keys =
+      Enum.zip(buy_requests, results)
+      |> Enum.flat_map(fn
+        {buy_request, {:ok, %{"status" => "ok"}}} -> [buy_request.idempotency_key]
+        _ -> []
+      end)
+
+    assert [[2]] =
+             Sql.query!(
+               "SELECT count(*) FROM economy_v2_ledger_entries WHERE request_key=ANY($1::text[]) AND reason_code IN ('MARKETPLACE_BUY','MARKETPLACE_SELL')",
+               [successful_request_keys]
              ).rows
   end
 
