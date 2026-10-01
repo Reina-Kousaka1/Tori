@@ -798,6 +798,41 @@ defmodule ToriEconomy.RewriteDomainTest do
     assert rejected["error"]["code"] == "ALREADY_OWNED"
   end
 
+  test "catalog purchase accepts the required career when other careers also have progress" do
+    user = snowflake()
+    item_id = "ballet_practice_flats"
+    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,10000)", [user])
+
+    Sql.query!(
+      "INSERT INTO economy_v2_career_progress(user_id,career_code,xp) VALUES ($1,'ballet',100),($1,'volleyball',400)",
+      [user]
+    )
+
+    assert {:ok, detail} =
+             Shop.execute(
+               request("shop.item", user, %{"item_id" => item_id, "period_key" => "catalog"})
+             )
+
+    assert detail["result"]["eligible"]
+
+    assert {:ok, purchase} =
+             Shop.execute(
+               request("shop.purchase", user, %{
+                 "item_id" => item_id,
+                 "quantity" => 1,
+                 "period_key" => "catalog"
+               })
+             )
+
+    assert purchase["status"] == "ok"
+
+    assert [[1]] =
+             Sql.query!(
+               "SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id=$2",
+               [user, item_id]
+             ).rows
+  end
+
   test "configured career XP is idempotent and does not invent a threshold" do
     user = snowflake()
     source = "test_" <> snowflake()

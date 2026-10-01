@@ -355,9 +355,10 @@ defmodule ToriEconomy.Shop do
              SELECT p.career_code,coalesce(max(t.level),1)
              FROM economy_v2_career_progress p
              LEFT JOIN economy_v2_xp_thresholds t ON t.required_xp<=coalesce(p.xp,0)
-             WHERE p.user_id=$1 GROUP BY p.career_code
+             WHERE p.user_id=$1 AND p.career_code=$2
+             GROUP BY p.career_code
            """,
-           [user]
+           [user, required_career]
          ).rows do
       [[^required_career, career_level]] -> career_level >= required_level
       _ -> false
