@@ -33,7 +33,7 @@ sourceSets {
     }
 }
 configurations.mongoMigrationImplementation.extendsFrom(configurations.implementation)
-dependencies { mongoMigrationImplementation 'org.mongodb:mongodb-driver-sync:5.6.1' }
+dependencies { mongoMigrationImplementation 'org.mongodb:mongodb-driver-sync:5.13.0' }
 java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
 application { mainClass = 'music.Main' }
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
