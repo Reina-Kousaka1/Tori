@@ -22,7 +22,7 @@ defmodule ToriEconomy.AutoMod.Guild do
   @impl true
   def init(opts) do
     {:ok, policy} = Policy.validate(Keyword.get(opts, :policy, %{}))
-    {:ok, %{policy: policy, joins: [], join_alerted: false, messages: %{}, seen: %{}}}
+    {:ok, %{policy: policy, joins: [], join_alerted: false, messages: %{}, seen: %{}, alerts: %{}}}
   end
 
   @impl true
@@ -98,13 +98,20 @@ defmodule ToriEconomy.AutoMod.Guild do
             nil
         end
 
+      alerts =
+        Map.filter(state.alerts, fn {_key, at} -> at > now - policy.flood_window_ms end)
+
+      key = if decision, do: {decision["rule"], user}
+      decision = if decision && Map.has_key?(alerts, key), do: nil, else: decision
+      alerts = if decision, do: Map.put(alerts, key, now), else: alerts
       flooded = flood_alerted or (decision != nil and decision["rule"] == "flood")
 
       {:reply, decision,
        %{
          state
          | messages: Map.put(messages, user, %{times: times, alerted: flooded}),
-           seen: if(map_size(seen) < 10_000, do: Map.put(seen, event_id, now), else: %{event_id => now})
+           seen: if(map_size(seen) < 10_000, do: Map.put(seen, event_id, now), else: %{event_id => now}),
+           alerts: alerts
        }}
     end
   end

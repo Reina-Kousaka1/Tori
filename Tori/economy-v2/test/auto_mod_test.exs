@@ -45,6 +45,9 @@ defmodule ToriEconomy.AutoModTest do
     assert %{"rule" => "invite"} =
              Guild.observe_message(server, 2, 10, 105, "discord.gg/example", 0, 500)
 
+    assert Guild.observe_message(server, 2, 10, 108, "discord.gg/example", 0, 550) == nil
+    assert Guild.observe_message(server, 2, 10, 109, "hi", 2, 580) == nil
+
     assert :ok = Guild.override(server, 2, true)
     assert Guild.observe_message(server, 2, 10, 106, "discord.gg/example", 4, 600) == nil
     assert :ok = Guild.override(server, 2, false)
