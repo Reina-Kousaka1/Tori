@@ -220,7 +220,7 @@ defmodule ToriEconomy.Contract do
     with :ok <- keys(args, ["item_id", "slot"]),
          :ok <- item_id(args["item_id"]),
          slot
-         when slot in ~w(top bottom dress outerwear shoes bag accessory jewelry hair_accessory) <-
+         when slot in ~w(top bottom dress outerwear shoes bag accessory jewelry hair_accessory necklace earrings) <-
            args["slot"] do
       :ok
     else
@@ -231,7 +231,7 @@ defmodule ToriEconomy.Contract do
   defp validate_args("inventory.unequip", args) do
     with :ok <- keys(args, ["slot"]),
          slot
-         when slot in ~w(top bottom dress outerwear shoes bag accessory jewelry hair_accessory) <-
+         when slot in ~w(top bottom dress outerwear shoes bag accessory jewelry hair_accessory necklace earrings) <-
            args["slot"] do
       :ok
     else

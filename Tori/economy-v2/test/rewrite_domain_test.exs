@@ -209,6 +209,93 @@ defmodule ToriEconomy.RewriteDomainTest do
              """).rows
   end
 
+  test "V12 style collections preserve IDs, prices, tags and cosmetic boundaries" do
+    assert [[51, 51]] =
+             Sql.query!("""
+             SELECT count(*),count(DISTINCT item_id)
+             FROM economy_v2_catalog_items WHERE 'v12_style_drop'=ANY(tags)
+             """).rows
+
+    assert [[total]] = Sql.query!("SELECT count(*) FROM economy_v2_catalog_items WHERE active").rows
+    assert total >= 317
+
+    for tag <- ~w(leopard_girly young_girly polka_dot pastel_fantasy everyday_girly sporty_sweet soft_glam) do
+      assert [[count]] =
+               Sql.query!(
+                 "SELECT count(*) FROM economy_v2_catalog_items WHERE 'v12_style_drop'=ANY(tags) AND $1=ANY(tags)",
+                 [tag]
+               ).rows
+
+      assert count > 0
+    end
+
+    assert [[0]] =
+             Sql.query!("""
+             SELECT count(*) FROM economy_v2_catalog_items
+             WHERE 'v12_style_drop'=ANY(tags) AND
+               (NOT active OR rarity NOT IN ('common','uncommon','rare','special')
+                OR buy_price IS NULL OR buy_price < 1 OR rotation_weight < 1
+                OR max_stack <> 1 OR stackable OR consumable
+                OR (category='beauty' AND
+                  (cosmetic_slots<>ARRAY['nails']::text[] OR tradeable OR cardinality(equip_slots)>0)))
+             """).rows
+
+    assert [[0]] =
+             Sql.query!("""
+             SELECT count(*) FROM economy_v2_catalog_items c
+             CROSS JOIN LATERAL unnest(c.equip_slots || c.conflict_slots) AS slot_values(value)
+             WHERE 'v12_style_drop'=ANY(c.tags)
+               AND slot_values.value NOT IN
+                 ('top','bottom','dress','outerwear','shoes','bag','accessory',
+                  'jewelry','hair_accessory','necklace','earrings')
+             """).rows
+
+    assert [[0]] =
+             Sql.query!("""
+             SELECT count(*) FROM economy_v2_catalog_items
+             WHERE 'v12_style_drop'=ANY(tags) AND
+               (('top'=ANY(equip_slots) AND NOT 'dress'=ANY(conflict_slots))
+                OR ('bottom'=ANY(equip_slots) AND NOT 'dress'=ANY(conflict_slots))
+                OR ('dress'=ANY(equip_slots) AND NOT conflict_slots @> ARRAY['top','bottom']::text[]))
+             """).rows
+  end
+
+  test "V12 jewelry slots combine independently and profile reads the equipped style" do
+    user = snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
+
+    for item <- ~w(everyday_white_fitted_tee cloud_parade_dress golden_layered_hearts sea_glass_drop_earrings rose_gloss_nail_style) do
+      Sql.query!(
+        "INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,$2,1)",
+        [user, item]
+      )
+    end
+
+    for {item, slot} <- [
+          {"everyday_white_fitted_tee", "top"},
+          {"cloud_parade_dress", "dress"},
+          {"golden_layered_hearts", "necklace"},
+          {"sea_glass_drop_earrings", "earrings"}
+        ] do
+      assert {:ok, %{"status" => "ok"}} =
+               Equipment.execute(request("inventory.equip", user, %{"item_id" => item, "slot" => slot}))
+    end
+
+    assert {:ok, %{"status" => "ok"}} =
+             Equipment.execute(
+               request("inventory.cosmetic.select", user, %{
+                 "item_id" => "rose_gloss_nail_style",
+                 "slot" => "nails"
+               })
+             )
+
+    assert {:ok, profile} = Queries.execute(request("profile.snapshot", user))
+    outfit = profile["result"]["loadout"]
+    assert Enum.sort(Enum.map(outfit, & &1["slot"])) == ["dress", "earrings", "necklace"]
+    assert Enum.any?(profile["result"]["cosmetics"], &(&1["slot"] == "nails"))
+    refute Enum.any?(outfit, &(&1["slot"] == "top"))
+  end
+
   test "career selection, practice, career XP, cooldown and replay are stateful and idempotent" do
     user = snowflake()
     select = request("career.select", user, %{"career_code" => "ballet"})

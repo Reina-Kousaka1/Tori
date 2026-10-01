@@ -13,6 +13,7 @@ defmodule ToriEconomy.TestSchema do
       url ->
         ensure_target!(url)
         migrations = migrations!()
+        repeatables = repeatables!()
 
         {:ok, :ok} =
           Repo.transaction(
@@ -31,6 +32,10 @@ defmodule ToriEconomy.TestSchema do
                 apply_v11_content_drop_if_missing!(migrations)
                 apply_v12_career_gameplay_if_missing!(migrations)
               end
+
+              Enum.each(repeatables, fn path ->
+                SQL.query!(Repo, File.read!(path), [], query_type: :text)
+              end)
 
               verify_schema!(migrations)
             end,
@@ -123,6 +128,11 @@ defmodule ToriEconomy.TestSchema do
     end
 
     migrations
+  end
+
+  defp repeatables! do
+    Path.wildcard(Path.join(@migration_dir, "R__tori_v12_*.sql"))
+    |> Enum.sort()
   end
 
   # Reuse an older isolated test schema by applying only the new idempotent content seed.
