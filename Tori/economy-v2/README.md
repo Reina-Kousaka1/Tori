@@ -87,18 +87,19 @@ selected career's XP; Skill Level is a derived summary of XP across all active
 careers using the existing shared thresholds. Thus Skill Level adds no second
 persisted progression state. `/profile [user]` is a read-only aggregate of
 Credits, account XP/Level, derived Skill Level, selected Career XP/Level,
-equipped outfit and selected style. Relationship/Marriage is omitted until a
-real domain exists. Individual career actions do not record global Persona mood
+equipped outfit and selected style. The read-only profile also reads an active
+Relationship from the V12 Marriage domain; it stores no relationship copy.
+Individual career actions do not record global Persona mood
 events or change Tori's global Presence context.
 
-The `/profile` and `/career` interactions are implemented and registered
-through Nostrum/Elixir against the configured main-bot guild. The Elixir
-registrar upserts exactly those two commands and leaves every other guild
-command untouched. Java/JDA remains the sole owner of its existing commands;
-its registration now upserts only the Java catalog rather than replacing the
-whole guild catalog. No business logic, production routing or write gates are
-changed. Career writes remain unavailable in production under the existing
-allowlist.
+The `/profile`, `/career`, `/marry`, `/divorce` and `/marriage` commands
+are Elixir-owned and registered in the configured main-bot guild when Nostrum
+is enabled. Optional `TORI_NOSTRUM_SHOP_ENABLED=true` transfers only `/shop`
+slash-command ownership: Java excludes it from registration and interaction
+handling when both Nostrum flags are true, and Elixir registers the V12 Catalog
+and featured-drop UI. It defaults to false. Java's remaining commands,
+Music/Lavalink and technical Presence writer are unchanged. Production Shop,
+Career and Marriage mutations remain blocked by the current WriteGate allowlist.
 
 ## Writes and ownership
 
@@ -112,8 +113,8 @@ name, and a runtime check that the connected PostgreSQL database is also
 Production writes require a separate explicit mode, exact database-name match,
 successful Flyway V5 state, an operator acknowledgement, and an operation
 allowlist currently limited to daily and transfer. The production gate does not
-authorize new shop, inventory, activity, progression, career or marketplace
-mutations. These gates do not prove that a backup was restored or stop other
+authorize new shop, inventory, activity, progression, career, marriage or
+marketplace mutations. These gates do not prove that a backup was restored or stop other
 Java processes. Other Java commands still write the same global wallet rows,
 so production wallet writes remain blocked until all writers for that data
 area have been transferred or disabled under a reviewed ownership plan.
@@ -121,12 +122,34 @@ area have been transferred or disabled under a reviewed ownership plan.
 Mutation requests use the Discord interaction ID as a persistent idempotency
 key. Daily and transfer balance updates, ledger entries, and stored results
 share one PostgreSQL transaction. The current test harness applies the
-repository's additive V1–V12 Flyway SQL to an empty isolated test database; it
+repository's V1–V12 Flyway SQL and repeatable V12 scripts to an empty
+isolated test database; it
 does not apply migrations to production. V5 reuses `economy_accounts`; V6–V12
 add catalog, rotation, loadout, progression, marketplace, activity, consumable
-and career-action configuration without resetting existing player data. Do not
+and career-action configuration without resetting existing player data. The
+repeatable V12 scripts insert 51 new style IDs, add necklace and earring slots,
+and create the Marriage relationship table. Existing TEXT-array tags are reused. Do not
 deploy a bot image that auto-applies pending migrations until the backup/restore and schema
 review gates in the Pi guide have been completed.
+
+## V12 Shop and AutoMod gates
+
+The existing Java `/shop` and `/buy` use legacy Market products. V12 Catalog
+items were absent from that Discord purchase path. With optional Elixir `/shop`
+ownership, `/shop catalog` paginates active styles, `/shop browse` shows a
+persisted featured rotation, and `/shop item` and `/shop buy` accept an item ID.
+Catalog purchases reuse the account, ledger, inventory and idempotency
+transaction; a numeric featured period still checks rotation expiry and stock.
+Seasonal and limited-stock items retain their availability rules. This does
+not enable production wallet writes.
+
+`TORI_AUTOMOD_ENABLED=false` by default. When enabled with Nostrum, per-guild
+OTP processes detect join bursts, floods, mention spam and invite links.
+Detection cases reuse `moderation_cases` with action `AUTO_DETECT` and result
+`OBSERVED`; no ban, timeout or deletion is executed. Thresholds, allowlists
+and review/alert escalation are transient, with internal OTP configuration
+and overrides. Join and message-content detection requires privileged gateway
+intents for the Discord application. Keep this disabled until the release gate.
 
 ## Build, test, and deployment
 
@@ -135,10 +158,10 @@ review gates in the Pi guide have been completed.
 - Isolated PostgreSQL tests require `TORI_ECONOMY_TEST_DATABASE_URL` to point
   to a dedicated database ending in `_test`. Under `MIX_ENV=test`, the
   application starts its Repo from this URL and ignores production database
-  settings. `mix test` applies Tori's V1–V12 Flyway SQL files to a fresh, empty
+  settings. `mix test` applies Tori's V1–V12 Flyway SQL and repeatable V12 files to a fresh, empty
   test schema before running the integration tests; an incomplete nonempty
   schema fails verification instead of being silently modified. An older
-  isolated schema with V1–V11 can receive the additive V12 action config. The target
+  isolated schema with V1–V11 can receive the additive V12 action config and repeatables. The target
   URL, supervised Repo configuration and connected database name are checked
   before any schema write. Without the test URL, database integration tests
   are skipped. Never use production credentials or data for these tests.
