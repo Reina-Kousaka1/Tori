@@ -307,6 +307,37 @@ defmodule ToriEconomy.RewriteDomainTest do
     refute Enum.any?(outfit, &(&1["slot"] == "top"))
   end
 
+  test "sporty everyday style is cosmetic and grants no career equipment bonus" do
+    user = snowflake()
+    assert {:ok, %{"status" => "ok"}} =
+             Progression.execute(request("career.select", user, %{"career_code" => "volleyball"}))
+
+    Sql.query!(
+      "INSERT INTO economy_inventory(user_id,item_id,quantity) VALUES ($1,'blush_court_shorts',1)",
+      [user]
+    )
+
+    assert {:ok, %{"status" => "ok"}} =
+             Equipment.execute(
+               request("inventory.equip", user, %{
+                 "item_id" => "blush_court_shorts",
+                 "slot" => "bottom"
+               })
+             )
+
+    assert {:ok, result} =
+             Progression.execute(
+               request("career.practice", user, %{
+                 "career_code" => "volleyball",
+                 "action_code" => "court_practice"
+               })
+             )
+
+    assert result["result"]["equipment_bonus_xp"] == 0
+    assert result["result"]["equipment_bonus_credits"] == 0
+    assert result["result"]["credits_awarded"] == "10"
+  end
+
   test "career selection, practice, career XP, cooldown and replay are stateful and idempotent" do
     user = snowflake()
     select = request("career.select", user, %{"career_code" => "ballet"})
