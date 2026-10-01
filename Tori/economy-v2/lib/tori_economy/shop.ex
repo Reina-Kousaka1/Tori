@@ -4,7 +4,7 @@ defmodule ToriEconomy.Shop do
   alias ToriEconomy.Persona.Season
   alias ToriEconomy.Shop.Rotation
 
-  @page_size 10
+  @page_size 8
 
   def execute(%{operation: "shop.rotation"} = request) do
     case Rotation.current() do

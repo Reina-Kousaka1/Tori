@@ -763,6 +763,17 @@ defmodule ToriEconomy.RewriteDomainTest do
 
     assert catalog["result"]["total_items"] > 20
     assert catalog["result"]["type"] == "shop_catalog"
+    assert {:ok, second_page} =
+             Shop.execute(request("shop.styles", user, %{"category" => "fashion", "page" => 1}))
+
+    first_ids = MapSet.new(Enum.map(catalog["result"]["items"], & &1["item_id"]))
+    second_ids = MapSet.new(Enum.map(second_page["result"]["items"], & &1["item_id"]))
+    assert MapSet.disjoint?(first_ids, second_ids)
+
+    assert {:ok, rendered} =
+             ToriEconomy.Discord.Adapter.render_result(:shop, catalog, user)
+
+    assert Enum.all?(catalog["result"]["items"], &String.contains?(rendered, &1["item_id"]))
 
     item_id = "soft_lavender_cardigan"
     args = %{"item_id" => item_id, "quantity" => 1, "period_key" => "catalog"}

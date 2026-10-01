@@ -295,7 +295,7 @@ defmodule ToriEconomy.Discord.Adapter do
   defp render_preview(:shop, _response, %{"type" => "shop_catalog"} = result, _user) do
     lines =
       Enum.map(result["items"], fn item ->
-        "#{rarity_mark(item["rarity"])} `#{item["item_id"]}` #{item["name"]} · #{item["unit_price"]} Credits · #{item["state"]}"
+        "#{rarity_mark(item["rarity"])} `#{item["item_id"]}` #{String.slice(item["name"], 0, 60)} · #{item["unit_price"]} Credits · #{item["state"]}"
       end)
 
     [
