@@ -815,6 +815,49 @@ defmodule ToriEconomy.RewriteDomainTest do
     assert cooldown["error"]["code"] == "COOLDOWN_ACTIVE"
   end
 
+  test "marketplace pagination exposes every listing on Discord pages" do
+    seller = snowflake()
+    item_id = "page_item_" <> snowflake()
+    category = "page_" <> snowflake()
+    Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [seller])
+
+    Sql.query!(
+      "INSERT INTO economy_v2_catalog_items(item_id,name,category,buy_price) VALUES ($1,'Page item',$2,25)",
+      [item_id, category]
+    )
+
+    Enum.each(1..13, fn index ->
+      Sql.query!(
+        """
+        INSERT INTO economy_v2_marketplace_listings
+          (listing_id,seller_user_id,item_id,quantity,ask_price,status,expires_at)
+        VALUES ($1,$2,$3,1,30,'ACTIVE',now()+interval '1 day')
+        """,
+        ["page_#{snowflake()}_#{index}", seller, item_id]
+      )
+    end)
+
+    assert {:ok, first} =
+             Marketplace.execute(
+               request("marketplace.browse", seller, %{"category" => category, "page" => 0})
+             )
+
+    assert {:ok, second} =
+             Marketplace.execute(
+               request("marketplace.browse", seller, %{"category" => category, "page" => 1})
+             )
+
+    assert first["result"]["total_items"] == 13
+    assert first["result"]["total_pages"] == 2
+    assert length(first["result"]["listings"]) == 8
+    assert length(second["result"]["listings"]) == 5
+
+    assert {:ok, text} =
+             ToriEconomy.Discord.Adapter.render_result(:marketplace, first, seller)
+
+    assert Enum.all?(first["result"]["listings"], &String.contains?(text, &1["listing_id"]))
+  end
+
   test "marketplace listing escrows an owned item and replay preserves quantity" do
     user = snowflake()
     Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])

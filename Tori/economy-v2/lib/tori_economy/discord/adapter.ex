@@ -564,7 +564,7 @@ defmodule ToriEconomy.Discord.Adapter do
   defp format(:marketplace, result, _user) do
     lines =
       Enum.map(result["listings"], fn listing ->
-        "• `#{listing["listing_id"]}` #{listing["name"]} ×#{listing["quantity"]} · #{listing["ask_price"]} Credits · seller `#{listing["seller_user_id"]}`"
+        "• `#{listing["listing_id"]}` #{String.slice(listing["name"], 0, 60)} ×#{listing["quantity"]} · #{listing["ask_price"]} Credits · seller `#{listing["seller_user_id"]}`"
       end)
 
     heading =
@@ -572,7 +572,7 @@ defmodule ToriEconomy.Discord.Adapter do
 
     if lines == [],
       do: heading <> "\nNo active listings on this page.",
-      else: (heading <> "\n" <> Enum.join(Enum.take(lines, 12), "\n")) |> clip()
+      else: (heading <> "\n" <> Enum.join(lines, "\n")) |> clip()
   end
 
   defp format(:consumables, %{"type" => "inventory_item"} = item, _user) do

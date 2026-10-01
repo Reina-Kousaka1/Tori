@@ -2,6 +2,8 @@ defmodule ToriEconomy.Marketplace do
   @moduledoc "Escrowed user listings; isolated-test writes only until exclusive ownership cutover."
   alias ToriEconomy.{Catalog, Idempotency, Inventory, Sql}
 
+  @page_size 8
+
   def execute(%{operation: "marketplace.inspect"} = request) do
     case Sql.query!(
            """
@@ -56,7 +58,7 @@ defmodule ToriEconomy.Marketplace do
         [category]
       ).rows
 
-    total_pages = max(1, div(total + 19, 20))
+    total_pages = max(1, div(total + @page_size - 1, @page_size))
     page = min(Map.get(request.args, "page", 0), total_pages - 1)
 
     listings =
@@ -67,9 +69,9 @@ defmodule ToriEconomy.Marketplace do
           FROM economy_v2_marketplace_listings l
           JOIN economy_v2_catalog_items c ON c.item_id=l.item_id
           WHERE l.status='ACTIVE' AND l.expires_at>now() AND ($1='all' OR c.category=$1)
-          ORDER BY l.created_at DESC,l.listing_id LIMIT 20 OFFSET $2
+          ORDER BY l.created_at DESC,l.listing_id LIMIT $2 OFFSET $3
         """,
-        [category, page * 20]
+        [category, @page_size, page * @page_size]
       ).rows
       |> Enum.map(fn [id, seller, item, name, item_category, rarity, qty, price, expires] ->
         %{
