@@ -1,5 +1,5 @@
 FROM node:24-bookworm-slim AS audio-node
-FROM gradle:8.14.3-jdk21 AS build
+FROM gradle:9.8.0-jdk21 AS build
 WORKDIR /app
 COPY . .
 RUN gradle --no-daemon test installDist
