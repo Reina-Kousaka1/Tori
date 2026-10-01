@@ -10,7 +10,12 @@ defmodule ToriEconomy.Discord.Gateway do
   def init(_opts) do
     Process.flag(:trap_exit, true)
 
-    with :ok <- Application.put_env(:nostrum, :gateway_intents, [:guilds]),
+    intents =
+      if ToriEconomy.AutoMod.enabled?(),
+        do: [:guilds, :guild_members, :guild_messages, :message_content],
+        else: [:guilds]
+
+    with :ok <- Application.put_env(:nostrum, :gateway_intents, intents),
          {:ok, started_apps} <- Application.ensure_all_started(:nostrum) do
       # Nostrum 0.10 provides the Consumer child as a GenServer start_link/1 callback.
       case NostrumConsumer.start_link(name: NostrumConsumer) do

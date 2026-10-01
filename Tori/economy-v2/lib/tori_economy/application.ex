@@ -58,7 +58,16 @@ defmodule ToriEconomy.Application do
       ToriEconomy.Persona.Mood,
       ToriEconomy.Persona.Presence,
       {Bandit, plug: ToriEconomy.Api, ip: ip, port: port}
-    ] ++ discord_children
+    ] ++ automod_children() ++ discord_children
+  end
+
+  defp automod_children do
+    if ToriEconomy.AutoMod.enabled?() and
+         System.get_env("TORI_NOSTRUM_ENABLED") == "true" do
+      [ToriEconomy.AutoMod.Supervisor]
+    else
+      []
+    end
   end
 
   defp discord_children do

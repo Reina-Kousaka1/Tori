@@ -4,6 +4,32 @@ defmodule ToriEconomy.Discord.NostrumConsumer do
   require Logger
   alias ToriEconomy.Discord.Adapter
 
+  def handle_event({:GUILD_MEMBER_ADD, {guild_id, member}, _state}) do
+    user = Map.get(member, :user)
+
+    if ToriEconomy.AutoMod.enabled?() and is_integer(guild_id) and is_map(user) and
+         is_integer(Map.get(user, :id)) and Map.get(user, :bot) != true do
+      ToriEconomy.AutoMod.observe_join(guild_id, user.id)
+    end
+  end
+
+  def handle_event({:MESSAGE_CREATE, message, _state}) do
+    author = Map.get(message, :author)
+    guild_id = Map.get(message, :guild_id)
+
+    if ToriEconomy.AutoMod.enabled?() and is_integer(guild_id) and is_map(author) and
+         is_integer(Map.get(author, :id)) and Map.get(author, :bot) != true do
+      ToriEconomy.AutoMod.observe_message(
+        guild_id,
+        author.id,
+        Map.get(message, :channel_id),
+        Map.get(message, :id),
+        Map.get(message, :content) || "",
+        length(Map.get(message, :mentions) || [])
+      )
+    end
+  end
+
   def handle_event({:INTERACTION_CREATE, interaction, _state}) do
     if Adapter.supported_interaction?(interaction) do
       acknowledge_and_finish(interaction)
