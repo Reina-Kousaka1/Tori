@@ -471,7 +471,9 @@ final class TicketOrderBot extends CommandListener {
         return store.claimTicket(t.guildId(),t.id(),e.getUser().getId())?"Ticket #"+t.id()+" claimed.":"Ticket is already claimed or closed.";
     }
     private String transcript(SlashCommandInteractionEvent e,TicketOrderStore.Ticket t) throws Exception {
-        if(!(e.getChannel() instanceof TextChannel channel))return "Transcript requires a text ticket channel.";
+        if(!(e.getChannel() instanceof TextChannel))return "Transcript requires a text ticket channel.";
+        TextChannel channel = CommandContext.cachedTextChannel(e.getGuild(), e.getChannel().getIdLong());
+        if(channel==null)return "The ticket channel is not available in the server cache.";
         TranscriptSnapshot snapshot=buildTranscript(channel,t.id());
         e.getHook().sendFiles(FileUpload.fromData(snapshot.content().getBytes(StandardCharsets.UTF_8),"ticket-"+t.id()+"-transcript.txt")).setEphemeral(true).queue(); return "Transcript exported (up to the latest 100 messages).";
     }
