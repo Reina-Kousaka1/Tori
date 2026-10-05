@@ -17,8 +17,8 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.22.3'
     implementation 'org.postgresql:postgresql:42.7.13'
     implementation 'com.zaxxer:HikariCP:7.0.2'
-    implementation 'org.flywaydb:flyway-core:13.8.0'
-    implementation 'org.flywaydb:flyway-database-postgresql:13.8.0'
+    implementation 'org.flywaydb:flyway-core:13.9.0'
+    implementation 'org.flywaydb:flyway-database-postgresql:13.9.0'
     testRuntimeOnly 'org.xerial:sqlite-jdbc:3.53.4.0'
     runtimeOnly 'org.slf4j:slf4j-simple:2.0.20'
     testImplementation platform('org.junit:junit-bom:6.1.3')
