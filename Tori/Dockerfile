@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS audio-node
+FROM node:26-bookworm-slim AS audio-node
 FROM gradle:9.8.0-jdk21 AS build
 WORKDIR /app
 COPY . .
