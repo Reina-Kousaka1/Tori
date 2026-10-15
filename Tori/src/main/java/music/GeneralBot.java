@@ -36,6 +36,7 @@ public final class GeneralBot extends CommandListener {
         "fish", "mine", "chop", "craft", "repair", "opencrate", "market", "iteminfo", "pricehistory");
     private static Set<String> commandNames() {
         var names = new HashSet<>(ECONOMY_COMMANDS);
+        names.addAll(SocialActionCommands.ids());
         if (shopOwnedByNostrum()) names.remove("shop");
         names.addAll(Set.of("prefix", "language", "help", "ping", "stats", "status",
             "restart", "shutdown", "uptime", "avatar"));
@@ -61,6 +62,7 @@ public final class GeneralBot extends CommandListener {
     private PostgresMarketStore market;
     private ToriPersona persona = ToriPersona.defaults();
     private ToriPresenceSync presenceSync = ToriPresenceSync.disabled();
+    private SocialGifProvider socialGifProvider = SocialGifPool.empty();
     private java.util.function.IntUnaryOperator presencePicker =
         bound -> ThreadLocalRandom.current().nextInt(bound);
     private String lastDefaultText;
@@ -72,6 +74,10 @@ public final class GeneralBot extends CommandListener {
     GeneralBot withPresenceSync(ToriPresenceSync sync) {
         this.presenceSync.close();
         this.presenceSync = Objects.requireNonNull(sync);
+        return this;
+    }
+    GeneralBot withSocialGifProvider(SocialGifProvider provider) {
+        this.socialGifProvider = Objects.requireNonNull(provider);
         return this;
     }
     GeneralBot withPresencePicker(java.util.function.IntUnaryOperator picker) {
@@ -143,7 +149,7 @@ public final class GeneralBot extends CommandListener {
         else manager.setPresence(status, activity);
     }
     public static List<CommandData> commands() {
-        var definitions = LocalizedCommands.apply(List.of(
+        var definitions = new ArrayList<CommandData>(List.of(
             Commands.slash("language", "Show or set the server language")
                 .addOptions(new OptionData(OptionType.STRING, "code", "Language")
                     .addChoice("Deutsch", "de").addChoice("English", "en").addChoice("Nederlands", "nl")),
@@ -244,11 +250,15 @@ public final class GeneralBot extends CommandListener {
                     new OptionData(OptionType.INTEGER, "ttl_seconds", "Optional activity lifetime in seconds")
                         .setRequiredRange(60, 604800))
         ));
+        definitions.addAll(SocialActionCommands.definitions());
+        LocalizedCommands.apply(definitions);
         return shopOwnedByNostrum()
             ? definitions.stream().filter(command -> !command.getName().equals("shop")).toList()
             : definitions;
     }
     @Override protected String handle(CommandContext event, Language language) {
+        if (SocialActionCommands.contains(event.getName()))
+            return SocialActionPresenter.success(language, socialAction(event));
         if (ECONOMY_COMMANDS.contains(event.getName())) return economy(event, language);
         if (event.getName().equals("prefix")) {
             require(prefixes != null, "prefix.unavailable");
@@ -360,6 +370,36 @@ public final class GeneralBot extends CommandListener {
         } catch (CurrencyStoreException ex) {
             throw new UserError("economy.unavailable");
         }
+    }
+
+    private EconomyV2Client.SocialActionResult socialAction(CommandContext event) {
+        require(economyRouting.source("social") == EconomyRouting.Source.ELIXIR, "social.unavailable");
+        require(economyV2Balance != null, "economy.unavailable");
+        var targetOption = event.getOption("user");
+        require(targetOption != null, "social.target.required");
+        var target = targetOption.getAsUser();
+
+        try {
+            var result = economyRead(() -> economyV2Balance.socialAction(event.getId(), event.getUser().getId(),
+                event.getGuild().getId(), event.getChannel().getId(), event.getName(), target.getId()));
+            if (!result.succeeded()) throw socialFailure(result);
+            return result;
+        } catch (CurrencyStoreException ex) {
+            throw new UserError("economy.unavailable");
+        }
+    }
+
+    private static UserError socialFailure(EconomyV2Client.SocialActionResult result) {
+        return switch (result.errorCode()) {
+            case "COOLDOWN_ACTIVE" -> new UserError("social.action.cooldown",
+                SocialCooldownFormatter.format(result.retryAfterMillis()));
+            case "INVALID_TARGET" -> new UserError("social.target.invalid");
+            case "UNKNOWN_ACTION", "INVALID_INPUT" -> new UserError("error.input");
+            case "READ_ONLY" -> new UserError("social.action.read_only");
+            case "IDEMPOTENCY_CONFLICT" -> new UserError("social.action.duplicate");
+            case "SERVICE_UNAVAILABLE", "INTERNAL_ERROR" -> new UserError("economy.unavailable");
+            default -> new UserError("economy.unavailable");
+        };
     }
 
     private String shopText(CommandContext event, Language language) throws CurrencyStoreException {
@@ -907,6 +947,14 @@ public final class GeneralBot extends CommandListener {
     }
     @Override protected MessageEmbed handleEmbed(CommandContext event, Language language) {
         if (event.getName().equals("help")) return helpEmbed(language);
+        if (SocialActionCommands.contains(event.getName())) {
+            var result = socialAction(event);
+            var embed = ToriEmbeds.text(ToriEmbeds.Category.GENERAL, language,
+                Messages.text(language, "social.action.title"), SocialActionPresenter.success(language, result));
+            socialGifProvider.select(result.actionId(), event.getId())
+                .ifPresent(url -> embed.setImage(url.toString()));
+            return embed.build();
+        }
         if (event.getName().equals("stats")) {
             var jda = event.getJDA();
             String inviteUrl = "https://discord.com/oauth2/authorize?client_id=" + jda.getSelfUser().getId()

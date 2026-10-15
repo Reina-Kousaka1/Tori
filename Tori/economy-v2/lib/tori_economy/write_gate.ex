@@ -25,7 +25,8 @@ defmodule ToriEconomy.WriteGate do
                  "marriage.accept",
                  "marriage.decline",
                  "marriage.cancel",
-                 "marriage.divorce"
+                 "marriage.divorce",
+                 "social.action"
                ]
 
   def authorize(operation) when operation in @mutations do

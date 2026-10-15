@@ -10,9 +10,26 @@ import static org.junit.jupiter.api.Assertions.*;
 class CommandDefinitionsTest {
     @Test void allSlashCommandsSerializeWithValidOptions() {
         var commands = CommandRegistration.definitions();
-        assertEquals(57, commands.size());
-        assertEquals(57, commands.stream().map(c -> c.getName()).distinct().count());
+        assertEquals(68, commands.size());
+        assertEquals(68, commands.stream().map(c -> c.getName()).distinct().count());
         commands.forEach(command -> assertDoesNotThrow(() -> command.toData().toString(), command.getName()));
+    }
+
+    @Test void socialActionsAreJdaCommandsWithOneRequiredDiscordUserTarget() {
+        var commands = GeneralBot.commands().stream()
+            .filter(command -> SocialActionCommands.contains(command.getName()))
+            .map(SlashCommandData.class::cast).toList();
+        assertEquals(Set.of("hug", "kiss", "pat", "cuddle", "poke", "slap", "bite", "tickle",
+            "highfive", "boop", "wave"), commands.stream().map(SlashCommandData::getName).collect(java.util.stream.Collectors.toSet()));
+        commands.forEach(command -> {
+            assertEquals(1, command.getOptions().size());
+            assertEquals("user", command.getOptions().getFirst().getName());
+            assertEquals(net.dv8tion.jda.api.interactions.commands.OptionType.USER,
+                command.getOptions().getFirst().getType());
+            assertTrue(command.getOptions().getFirst().isRequired());
+        });
+        assertEquals(commands.stream().map(SlashCommandData::getName).collect(java.util.stream.Collectors.toSet()),
+            ToriHelp.entries().get(ToriHelp.Section.SOCIAL).stream().collect(java.util.stream.Collectors.toSet()));
     }
     @Test void statusExposesRotationAndPresenceV2Options() throws Exception {
         var command = GeneralBot.commands().stream().filter(c -> c.getName().equals("status")).findFirst().orElseThrow();

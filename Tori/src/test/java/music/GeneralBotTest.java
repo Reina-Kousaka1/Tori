@@ -77,6 +77,15 @@ class GeneralBotTest {
         }
     }
 
+    @Test void socialActionsDoNotFallBackToJavaWhenTheDomainIsNotRoutedToElixir() throws Exception {
+        var fixture = new Fixture();
+        try (var bot = bot(new StatusRotation()).withEconomyRouting(EconomyRouting.legacy())) {
+            var error = assertThrows(UserError.class,
+                () -> bot.handle(fixture.event("hug", CALLER), Language.EN));
+            assertEquals("social.unavailable", error.getMessage());
+        }
+    }
+
     @TempDir Path directory;
 
     @Test void statsUsesTheCurrentProcessStartAndIsPublic() throws Exception {

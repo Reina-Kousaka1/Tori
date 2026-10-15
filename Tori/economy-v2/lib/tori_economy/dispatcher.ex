@@ -11,7 +11,8 @@ defmodule ToriEconomy.Dispatcher do
     Persona,
     Progression,
     Queries,
-    Shop
+    Shop,
+    Social
   }
 
   def execute(request) do
@@ -44,6 +45,9 @@ defmodule ToriEconomy.Dispatcher do
 
         "marriage." <> _ ->
           Marriage.execute(request)
+
+        "social.action" ->
+          Social.execute(request)
 
         "activity.perform" ->
           Activity.execute(request)
@@ -88,6 +92,7 @@ defmodule ToriEconomy.Dispatcher do
   defp context_for("marketplace." <> _), do: :shop
   defp context_for("progression." <> _), do: :profile
   defp context_for("career." <> _), do: :profile
+  defp context_for("social." <> _), do: :social
   defp context_for("inventory.cosmetic." <> _), do: :inventory
   defp context_for("activity." <> _), do: :activities
   defp context_for(_), do: :general

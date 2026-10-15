@@ -184,6 +184,81 @@ class EconomyV2ClientTest {
     }
 
     @Test
+    void socialActionSendsDiscordInteractionTargetAndMapsStructuredDomainResult() throws Exception {
+        var captured = new ArrayList<JsonNode>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/economy/v1/execute", exchange -> {
+            try (exchange) {
+                JsonNode request = JSON.readTree(exchange.getRequestBody());
+                captured.add(request);
+                byte[] bytes = JSON.writeValueAsBytes(Map.of(
+                    "request_id", request.path("request_id").asText(),
+                    "status", "ok",
+                    "result", Map.of("type", "social_action", "action_id", "hug",
+                        "actor_user_id", "123456789012345678", "target_user_id", "456789012345678901",
+                        "social_effect", "none", "cooldown_ms", "86400000", "cooldown_remaining_ms", "0")));
+                exchange.sendResponseHeaders(200, bytes.length);
+                exchange.getResponseBody().write(bytes);
+            }
+        });
+        server.start();
+        try {
+            var client = new EconomyV2Client(HttpClient.newHttpClient(),
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort()), SECRET);
+            var first = client.socialAction("987654321012345678", "123456789012345678",
+                "234567890123456789", "345678901234567890", "hug", "456789012345678901");
+            var retry = client.socialAction("987654321012345678", "123456789012345678",
+                "234567890123456789", "345678901234567890", "hug", "456789012345678901");
+
+            assertTrue(first.succeeded());
+            assertEquals(first, retry);
+            assertEquals(86_400_000, first.cooldownMillis());
+            assertEquals(2, captured.size());
+            assertNotEquals(captured.getFirst().path("request_id").asText(),
+                captured.getLast().path("request_id").asText());
+            assertEquals("social.action", captured.getFirst().path("operation").asText());
+            assertEquals(captured.getFirst().path("operation"), captured.getLast().path("operation"));
+            assertEquals(captured.getFirst().path("context"), captured.getLast().path("context"));
+            assertEquals(captured.getFirst().path("args"), captured.getLast().path("args"));
+            assertEquals("hug", captured.getFirst().path("args").path("action_id").asText());
+            assertEquals("456789012345678901", captured.getFirst().path("context").path("target_user_id").asText());
+            assertEquals("discord-interaction:987654321012345678",
+                captured.getFirst().path("idempotency_key").asText());
+            assertEquals(captured.getFirst().path("idempotency_key"),
+                captured.getLast().path("idempotency_key"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void socialCooldownErrorMapsStableCodeAndRetryMilliseconds() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/economy/v1/execute", exchange -> {
+            try (exchange) {
+                JSON.readTree(exchange.getRequestBody());
+                byte[] bytes = """
+                    {"status":"error","error":{"code":"COOLDOWN_ACTIVE","retryable":false,
+                     "details":{"retry_after_ms":"2820000"}}}
+                    """.getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, bytes.length);
+                exchange.getResponseBody().write(bytes);
+            }
+        });
+        server.start();
+        try {
+            var client = new EconomyV2Client(HttpClient.newHttpClient(),
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort()), SECRET);
+            var result = client.socialAction("987654321012345678", "123456789012345678",
+                "234567890123456789", "345678901234567890", "hug", "456789012345678901");
+            assertEquals("COOLDOWN_ACTIVE", result.errorCode());
+            assertEquals(2_820_000, result.retryAfterMillis());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void unavailableServiceAndMalformedResponseFailClosed() throws Exception {
         int unusedPort;
         try (var socket = new ServerSocket(0)) { unusedPort = socket.getLocalPort(); }

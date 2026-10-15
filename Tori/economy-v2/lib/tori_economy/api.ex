@@ -220,7 +220,7 @@ defmodule ToriEconomy.Api do
       {:error, "SERVICE_UNAVAILABLE"} ->
         reply(conn, 503, error(nil, "SERVICE_UNAVAILABLE", true))
 
-      {:error, code} when code in ["INVALID_AMOUNT", "INVALID_TARGET"] ->
+      {:error, code} when code in ["INVALID_AMOUNT", "INVALID_TARGET", "UNKNOWN_ACTION"] ->
         reply(conn, 400, error(nil, code, false))
 
       _ ->

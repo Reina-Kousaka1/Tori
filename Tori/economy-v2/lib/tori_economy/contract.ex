@@ -24,7 +24,8 @@ defmodule ToriEconomy.Contract do
     "marriage.accept",
     "marriage.decline",
     "marriage.cancel",
-    "marriage.divorce"
+    "marriage.divorce",
+    "social.action"
   ]
   @reads [
     "wallet.balance",
@@ -62,6 +63,7 @@ defmodule ToriEconomy.Contract do
          :ok <- snowflake(context["channel_id"]),
          :ok <- optional_snowflake(context["target_user_id"]),
          :ok <- validate_args(operation, args),
+         :ok <- validate_social_target(operation, context, args),
          :ok <- validate_key(operation, raw["idempotency_key"]) do
       {:ok,
        %{
@@ -73,7 +75,10 @@ defmodule ToriEconomy.Contract do
          fingerprint: fingerprint(operation, context, args)
        }}
     else
-      {:error, code} when code in ["INVALID_AMOUNT", "INVALID_TARGET"] -> {:error, code}
+      {:error, code}
+      when code in ["INVALID_AMOUNT", "INVALID_TARGET", "UNKNOWN_ACTION"] ->
+        {:error, code}
+
       _ -> {:error, "INVALID_INPUT"}
     end
   end
@@ -82,6 +87,17 @@ defmodule ToriEconomy.Contract do
 
   defp validate_args("wallet.balance", args), do: keys(args, [])
   defp validate_args("daily.claim", args), do: keys(args, [])
+
+  defp validate_args("social.action", args) do
+    with :ok <- keys(args, ["action_id"]),
+         action when is_binary(action) <- args["action_id"],
+         {:ok, _definition} <- ToriEconomy.Social.ActionRegistry.fetch(action) do
+      :ok
+    else
+      {:error, "UNKNOWN_ACTION"} -> {:error, "UNKNOWN_ACTION"}
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
 
   defp validate_args(operation, args) when operation in ["inventory.list", "wardrobe.list"] do
     with :ok <- keys(args, ["category", "page"]),
@@ -379,6 +395,16 @@ defmodule ToriEconomy.Contract do
   defp snowflake(_), do: {:error, "INVALID_INPUT"}
   defp optional_snowflake(nil), do: :ok
   defp optional_snowflake(value), do: snowflake(value)
+
+  defp validate_social_target("social.action", context, args),
+    do:
+      ToriEconomy.Social.ActionRegistry.validate_target(
+        args["action_id"],
+        context["actor_user_id"],
+        context["target_user_id"]
+      )
+
+  defp validate_social_target(_, _, _), do: :ok
 
   defp keys(map, allowed) do
     if Enum.all?(Map.keys(map), &(&1 in allowed)), do: :ok, else: {:error, "INVALID_INPUT"}

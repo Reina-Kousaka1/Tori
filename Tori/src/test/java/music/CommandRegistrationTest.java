@@ -23,7 +23,8 @@ class CommandRegistrationTest {
         "kick", "ban", "unban", "timeout", "untimeout", "purge", "slowmode", "language", "help", "ping", "stats", "status", "restart", "shutdown", "uptime", "snipe", "avatar", "order", "ticket",
         "balance", "daily", "shop", "buy", "sell", "inventory", "equip", "tools", "fish", "mine", "chop", "craft", "repair", "opencrate",
         "market", "iteminfo", "pricehistory", "beg", "work", "loot", "transfer", "gamble", "slots",
-        "leaderboard", "grantcredits", "grantitem", "unequip");
+        "leaderboard", "grantcredits", "grantitem", "unequip",
+        "hug", "kiss", "pat", "cuddle", "poke", "slap", "bite", "tickle", "highfive", "boop", "wave");
 
     @Test void globalRegistrationUpsertsTheJavaCatalogWithoutReplacingOtherCommands() throws Exception {
         var transport = new RecordingTransport();
@@ -42,7 +43,7 @@ class CommandRegistrationTest {
             payload.add(JSON.readTree(request.body()));
         }
 
-        assertEquals(57, payload.size());
+        assertEquals(68, payload.size());
         Set<String> names = new HashSet<>();
         for (var command : payload) {
             names.add(command.path("name").asText());
@@ -83,7 +84,7 @@ class CommandRegistrationTest {
         assertTrue(named(payload, "ping").path("default_member_permissions").isNull()
             || !named(payload, "ping").has("default_member_permissions"));
         assertTrue(status.path("default_member_permissions").isNull() || !status.has("default_member_permissions"));
-        assertTrue(output.contains("57 Java-owned slash commands (global)"));
+        assertTrue(output.contains("68 Java-owned slash commands (global)"));
         NAMES.forEach(name -> assertTrue(output.contains("/" + name)));
         assertFalse(output.contains(TOKEN));
         assertTrue(transport.requests.stream().noneMatch(request -> Set.of("PUT", "DELETE").contains(request.method())));
