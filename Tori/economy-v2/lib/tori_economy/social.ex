@@ -46,7 +46,7 @@ defmodule ToriEconomy.Social do
     end
   end
 
-  defp complete(request, definition, actor, target, now_ms) do
+  defp complete(_request, definition, actor, target, now_ms) do
     Sql.query!(
       """
       INSERT INTO economy_v2_social_action_cooldowns
