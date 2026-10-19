@@ -23,7 +23,7 @@ defmodule ToriEconomy.MixProject do
     [
       {:ecto_sql, "~> 3.14"},
       {:postgrex, "~> 0.22.4"},
-      {:bandit, "~> 1.12.5"},
+      {:bandit, "~> 1.13.1"},
       {:jason, "~> 1.4.5"},
       {:nostrum, "~> 0.10.4", runtime: false}
     ]
