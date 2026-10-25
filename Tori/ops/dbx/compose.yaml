@@ -1,0 +1,36 @@
+name: tori-dbx-ops
+
+services:
+  dbx:
+    image: t8y2/dbx:v0.6.54
+    platform: linux/arm64
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 90s
+    ports:
+      - "127.0.0.1:${DBX_WEB_PORT:-4224}:4224"
+    environment:
+      DBX_PORT: "4224"
+      DBX_PASSWORD: ${DBX_WEB_PASSWORD:?Set DBX_WEB_PASSWORD in the untracked ops/dbx/.env}
+      DBX_BACKUP_ROOT: /app/backups
+      DBX_SECRET_KEY_FILE: /run/secrets/dbx_secret_key
+    secrets:
+      - dbx_secret_key
+    volumes:
+      - dbx-data:/app/data
+      - dbx-backups:/app/backups
+    networks:
+      - dbx-ops
+
+secrets:
+  dbx_secret_key:
+    file: ${DBX_SECRET_KEY_HOST_FILE:?Set DBX_SECRET_KEY_HOST_FILE in the untracked ops/dbx/.env}
+
+volumes:
+  dbx-data:
+  dbx-backups:
+
+networks:
+  dbx-ops:
+    external: true
+    name: dbx-ops
