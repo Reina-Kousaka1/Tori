@@ -15,8 +15,8 @@ runtime code or database migration is changed by DBX.
   current user's `~/.local/opt/dbx/` directory.
 - Tori PostgreSQL joins the dedicated Docker network `dbx-ops` as
   `tori-postgres`. Noélia contributes its own PostgreSQL service to that same
-  network with the alias `noelia-postgres` using
-  [`Noélia's DBX overlay`](https://github.com/Reina-Kousaka1/Noelia/blob/main/ops/dbx/compose.dbx.override.yaml).
+  network with the alias `noelia-postgres` using its
+  `ops/dbx/compose.dbx.override.yaml` overlay.
 - The DBX Web port is published only on `127.0.0.1`; use an SSH tunnel for
   remote browser access. The DBX service has no direct public bind.
 - Persistent DBX state and its externally managed encryption key live

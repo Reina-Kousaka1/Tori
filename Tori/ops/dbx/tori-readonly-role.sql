@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
--- Run interactively with psql while connected to tori_main as a database
--- administrator. This is an operations script, not a Flyway migration.
+-- Execute with psql while connected to tori_main as a database administrator.
+-- This is an operations script, not a Flyway migration.
 -- It deliberately fails if the role already exists; inspect existing grants
 -- rather than silently changing an existing principal.
 
