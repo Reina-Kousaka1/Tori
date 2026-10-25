@@ -1,6 +1,19 @@
 # Tori
 
-Tori is a hybrid Discord bot for music, moderation, economy and interactive gameplay, built with Java/JDA, Elixir/Nostrum and PostgreSQL.
+[![Java 21](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
+[![JDA 6.7.0](https://img.shields.io/badge/JDA-6.7.0-5865F2?logo=discord&logoColor=white)](https://github.com/discord-jda/JDA)
+[![Elixir 1.18.5](https://img.shields.io/badge/Elixir-1.18.5-4B275F?logo=elixir&logoColor=white)](https://elixir-lang.org/)
+[![Erlang/OTP 27.3.4.18](https://img.shields.io/badge/Erlang%2FOTP-27.3.4.18-A90533?logo=erlang&logoColor=white)](https://www.erlang.org/)
+[![Nostrum 0.10.4](https://img.shields.io/badge/Nostrum-0.10.4-6C3483)](https://hexdocs.pm/nostrum/0.10.4/)
+[![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Gradle 9.8.0](https://img.shields.io/badge/Gradle-9.8.0-02303A?logo=gradle&logoColor=white)](https://gradle.org/)
+[![Lavalink audio](https://img.shields.io/badge/Lavalink-audio-7B68EE)](https://lavalink.dev/)
+[![License](https://img.shields.io/github/license/Reina-Kousaka1/Tori)](LICENSE)
+[![Open pull requests](https://img.shields.io/github/issues-pr/Reina-Kousaka1/Tori)](https://github.com/Reina-Kousaka1/Tori/pulls)
+
+Tori is a hybrid Discord bot built with Java/JDA and Elixir/OTP. Java owns the established runtime—including music through Lavalink, moderation, tickets and orders—while Elixir/Nostrum provides the internal Economy API and specifically assigned Discord interactions. Both runtimes use PostgreSQL as the persistent source of truth.
+
+**Navigation:** [Overview](#about) · [Features](#features) · [Architecture](#architecture) · [Development](#development) · [Java & Docker guide](Tori/README.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [License](LICENSE)
 
 ## About
 
@@ -35,7 +48,48 @@ Nostrum is disabled by default. When enabled, it uses the existing main-bot `DIS
 | Lavalink | Separate audio service used by the Java music runtime |
 | Docker Compose | Local/container orchestration for PostgreSQL, Lavalink, the internal Economy API and the Java bot |
 
-Economy V2 routes default to Java's `LEGACY` implementation. Elixir writes require explicit gates; the Compose defaults disable production writes. Integration tests must use an isolated PostgreSQL database, never production. The repository contains Flyway migrations through V12 and repeatable V12 scripts; their presence in Git does not assert which migrations have been applied by any deployment.
+### High-level architecture
+
+```mermaid
+flowchart LR
+    Discord[Discord]
+    Java["Java 21 / JDA 6.7.0"]
+    Elixir["Elixir 1.18.5 / OTP 27.3.4.18 / Nostrum 0.10.4"]
+    PostgreSQL[(PostgreSQL 17)]
+    Lavalink["Lavalink audio service"]
+
+    Discord -->|Java-owned commands| Java
+    Discord -->|Assigned interactions when enabled| Elixir
+    Java -->|Economy API when explicitly routed| Elixir
+    Java --> PostgreSQL
+    Elixir --> PostgreSQL
+    Java --> Lavalink
+```
+
+### Runtime and service dependencies
+
+```mermaid
+flowchart TD
+    Discord[Discord Gateway / API]
+
+    subgraph Compose[Docker Compose services]
+        Bot["bot · Java / JDA"]
+        EconomyAPI["economy-api · Elixir / OTP"]
+        Database["postgres · PostgreSQL 17"]
+        Audio["lavalink · audio service"]
+    end
+
+    Discord --> Bot
+    Discord -->|Nostrum enabled| EconomyAPI
+    Bot -->|Internal API for routed operations| EconomyAPI
+    Bot --> Database
+    EconomyAPI --> Database
+    Bot --> Audio
+```
+
+The Compose file currently uses the moving `latest` tag for Lavalink, so no Lavalink version badge is shown.
+
+Economy V2 routes default to Java's `LEGACY` implementation. Elixir writes require explicit gates; the Compose defaults disable production writes. Integration tests must use an isolated PostgreSQL database, never production. The repository contains Flyway migrations through V13 and repeatable V12 scripts; their presence in Git does not assert which migrations have been applied by any deployment.
 
 ## Repository layout
 
@@ -76,7 +130,7 @@ Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md). See [SUPPORT.md
 
 ## Contributing
 
-Contributions are welcome through focused branches and pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [pull request template](.github/pull_request_template.md).
+Tori maintainer work is done directly on `main`, without feature or documentation branches or force-pushes. External contributions may be proposed as focused pull requests from a fork. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [pull request template](.github/pull_request_template.md).
 
 ## License
 

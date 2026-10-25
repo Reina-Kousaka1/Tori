@@ -13,7 +13,7 @@ cd Tori/Tori
 
 The versions below come from the Gradle, Mix and Docker configuration in this repository:
 
-- **Java:** JDK 21. Gradle uses the checked-in wrapper; `Tori/gradle/wrapper/gradle-wrapper.properties` currently pins Gradle 9.7.1.
+- **Java:** JDK 21. Gradle uses the checked-in wrapper; `Tori/gradle/wrapper/gradle-wrapper.properties` currently pins Gradle 9.8.0.
 - **Elixir:** Elixir 1.18.x, as constrained by `Tori/economy-v2/mix.exs`. The Economy API Docker image pins Elixir 1.18.5 with Erlang/OTP 27.3.4.18.
 - **PostgreSQL:** PostgreSQL 17 is the Compose version. Database integration tests need a separate, disposable database.
 - **Docker:** Docker Engine/Desktop with Docker Compose is used for the repository's container setup. It is optional for Java-only or Elixir-only unit tests.
@@ -29,12 +29,12 @@ Never commit `.env`, bot tokens, webhook credentials, database passwords, API se
 
 ## Development workflow
 
-1. Create a focused branch or fork from the current `main` and make one logical change at a time.
+1. Tori maintainer work is done directly on `main`; do not create feature or documentation branches, and never force-push.
 2. Read the relevant domain documentation before changing behavior.
 3. Respect Java/Elixir ownership and PostgreSQL as the one persistent source of truth. Do not duplicate wallet, inventory, career, profile, or progression state.
 4. Add or update regression tests for behavior changes without weakening existing checks.
-5. Run the relevant formatting, compile, test and build checks below before opening a pull request.
-6. Fill in [the pull request template](.github/pull_request_template.md), including database and security details where applicable.
+5. Run the relevant formatting, compile, test and build checks below before committing and pushing normally to `origin/main`.
+6. External contributors may submit a focused pull request from a fork; do not create a topic branch in the Tori repository. Use [the pull request template](.github/pull_request_template.md), including database and security details where applicable.
 
 Do not perform production deployments, database writes, migration runs, or routing/writer cutovers as part of local validation.
 
@@ -97,4 +97,4 @@ There are currently no GitHub Actions workflow files in this repository, so thes
 
 ## Pull requests
 
-External contributors should use a normal topic branch or fork and open a pull request against `main`; do not push directly to `main`. Keep the pull request focused, describe user-visible changes, list the checks actually run, and call out any migration, command ownership, security, or compatibility impact. Do not claim skipped checks passed.
+Tori maintainer changes are made directly on `main`; routine Tori development does not use in-repository feature or documentation branches. Push commits normally and never force-push. External contributors can propose focused changes through a pull request from a fork. Describe user-visible changes, list the checks actually run, and call out any migration, command ownership, security, or compatibility impact. Do not claim skipped checks passed.
