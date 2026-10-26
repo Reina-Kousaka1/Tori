@@ -12,10 +12,11 @@ import java.net.URI;
 import java.net.http.*;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/** One command catalog for normal startup and registration without a running music service. */
+/** Maintains JDA-owned commands without replacing commands owned by another runtime. */
 public final class CommandRegistration {
     private static final String API = "https://discord.com/api/v10";
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -34,27 +35,56 @@ public final class CommandRegistration {
     public static void register(JDA jda, String guildId) {
         String guild = guildId(guildId);
         var commands = definitions();
-        List<Command> registered;
+        var server = guild == null ? null : jda.getGuildById(guild);
+        if (guild != null && server == null)
+            throw new RegistrationException("Configured DISCORD_GUILD_ID is not available to this bot. Check the server ID and bot membership.");
+
+        Set<String> names;
         try {
-            var action = jda.updateCommands();
-            if (guild != null) {
-                var server = jda.getGuildById(guild);
-                if (server == null) throw new RegistrationException("Configured DISCORD_GUILD_ID is not available to this bot. Check the server ID and bot membership.");
-                action = server.updateCommands();
+            List<Command> existing = server == null
+                ? jda.retrieveCommands().complete()
+                : server.retrieveCommands().complete();
+            Set<String> targetNames = commands.stream().map(CommandData::getName).collect(Collectors.toSet());
+            Set<String> existingJavaNames = new HashSet<>();
+            for (var command : existing) {
+                if (command.getType() == Command.Type.SLASH && targetNames.contains(command.getName()))
+                    existingJavaNames.add(command.getName());
             }
-            registered = action.addCommands(commands).timeout(20, TimeUnit.SECONDS).complete();
+
+            var missing = missingCommands(commands, existingJavaNames);
+            List<Command> created = upsertIndividually(missing,
+                command -> (server == null ? jda.upsertCommand(command) : server.upsertCommand(command)).submit());
+
+            names = new HashSet<>(existingJavaNames);
+            for (var command : created) {
+                if (command.getType() != Command.Type.SLASH || !names.add(command.getName())) throw incomplete();
+            }
         } catch (RuntimeException ex) {
             if (ex instanceof RegistrationException safe) throw safe;
             String detail = ex instanceof net.dv8tion.jda.api.exceptions.ErrorResponseException discord
                 ? "Discord error code " + discord.getErrorCode() : ex.getClass().getSimpleName();
             throw new RegistrationException("Discord slash-command registration failed (" + detail + "). Check server access and connection.");
         }
-        Set<String> names = new HashSet<>();
-        if (registered.size() != commands.size()) throw incomplete();
-        for (var command : registered) {
-            if (command.getType() != Command.Type.SLASH || !names.add(command.getName())) throw incomplete();
-        }
         confirm(names, commands, guild);
+    }
+
+    static List<CommandData> missingCommands(List<CommandData> commands, Set<String> existingCommandNames) {
+        return commands.stream().filter(command -> !existingCommandNames.contains(command.getName())).toList();
+    }
+
+    static <T> List<T> upsertIndividually(
+        List<CommandData> commands, Function<CommandData, CompletableFuture<T>> upsert
+    ) {
+        var requests = commands.stream().map(upsert).toList();
+        try {
+            CompletableFuture.allOf(requests.toArray(CompletableFuture<?>[]::new)).get(60, TimeUnit.SECONDS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new RegistrationException("Discord slash-command registration was interrupted.");
+        } catch (ExecutionException | TimeoutException ex) {
+            throw new RegistrationException("Discord slash-command registration failed. Check server access and connection.");
+        }
+        return requests.stream().map(CompletableFuture::join).toList();
     }
 
     public static void register(String token, String guildId) {
@@ -66,7 +96,7 @@ public final class CommandRegistration {
                     .header("User-Agent", "DiscordMusicBot/1.0")
                     .header("Content-Type", "application/json");
                 if (method.equals("GET")) request.GET();
-                else request.PUT(HttpRequest.BodyPublishers.ofString(body));
+                else request.method(method, HttpRequest.BodyPublishers.ofString(body));
                 var response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
                 return new Response(response.statusCode(), response.body());
             });
@@ -82,17 +112,40 @@ public final class CommandRegistration {
         String applicationId = application.path("id").asText();
         if (!applicationId.matches("[0-9]{17,20}"))
             throw new RegistrationException("Discord returned an invalid application ID.");
-        var payload = JSON.createArrayNode();
-        for (var command : commands) payload.add(parse(command.toData().toString()));
+
         URI endpoint = URI.create(API + "/applications/" + applicationId
             + (guild == null ? "" : "/guilds/" + guild) + "/commands");
-        JsonNode registered = response(send(transport, "PUT", endpoint, token, payload.toString()));
-        if (!registered.isArray() || registered.size() != commands.size()) throw incomplete();
+        JsonNode existing = response(send(transport, "GET", endpoint, token, null));
+        if (!existing.isArray()) throw incomplete();
+
         Set<String> names = new HashSet<>();
-        for (var command : registered) {
-            if (command.path("type").asInt(-1) != 1 || !names.add(command.path("name").asText())) throw incomplete();
+        for (var command : commands) {
+            JsonNode current = findSlashCommand(existing, command.getName());
+            String method = current == null ? "POST" : "PATCH";
+            URI target = endpoint;
+
+            if (current != null) {
+                String id = current.path("id").asText();
+                if (!id.matches("[0-9]{17,20}")) throw incomplete();
+                target = URI.create(endpoint + "/" + id);
+            }
+
+            Set<Integer> expectedStatuses = current == null ? Set.of(200, 201) : Set.of(200);
+            JsonNode updated = response(send(transport, method, target, token, command.toData().toString()),
+                expectedStatuses);
+            if (updated.path("type").asInt(-1) != 1
+                || !updated.path("name").asText().equals(command.getName())
+                || !names.add(command.getName())) throw incomplete();
         }
         confirm(names, commands, guild);
+    }
+
+    private static JsonNode findSlashCommand(JsonNode commands, String name) {
+        for (var command : commands) {
+            if (command.path("type").asInt(-1) == 1 && command.path("name").asText().equals(name))
+                return command;
+        }
+        return null;
     }
 
     private static String guildId(String value) {
@@ -115,7 +168,11 @@ public final class CommandRegistration {
     }
 
     private static JsonNode response(Response response) {
-        if (response.statusCode() != 200)
+        return response(response, Set.of(200));
+    }
+
+    private static JsonNode response(Response response, Set<Integer> expectedStatuses) {
+        if (!expectedStatuses.contains(response.statusCode()))
             throw new RegistrationException("Discord slash-command registration failed (HTTP " + response.statusCode() + ").");
         return parse(response.body());
     }
@@ -132,13 +189,13 @@ public final class CommandRegistration {
 
     private static void confirm(Set<String> names, List<CommandData> commands, String guild) {
         if (!names.equals(commands.stream().map(CommandData::getName).collect(Collectors.toSet()))) throw incomplete();
-        System.out.println("Registered " + names.size() + " slash commands ("
+        System.out.println("Registered " + names.size() + " Java-owned slash commands ("
             + (guild == null ? "global" : "server " + guild) + "): "
             + commands.stream().map(command -> "/" + command.getName()).collect(Collectors.joining(", ")));
     }
 
     private static IllegalStateException incomplete() {
-        return new RegistrationException("Discord did not confirm the complete slash-command list. Registration is not verified.");
+        return new RegistrationException("Discord did not confirm all Java-owned slash-command updates.");
     }
 
     /** Only locally authored messages; never external response bodies or exception causes. */

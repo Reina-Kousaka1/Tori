@@ -13,6 +13,7 @@ defmodule ToriEconomy.TestSchema do
       url ->
         ensure_target!(url)
         migrations = migrations!()
+        repeatables = repeatables!()
 
         {:ok, :ok} =
           Repo.transaction(
@@ -30,7 +31,12 @@ defmodule ToriEconomy.TestSchema do
               else
                 apply_v11_content_drop_if_missing!(migrations)
                 apply_v12_career_gameplay_if_missing!(migrations)
+                apply_v13_social_if_missing!(migrations)
               end
+
+              Enum.each(repeatables, fn path ->
+                SQL.query!(Repo, File.read!(path), [], query_type: :text)
+              end)
 
               verify_schema!(migrations)
             end,
@@ -125,6 +131,11 @@ defmodule ToriEconomy.TestSchema do
     migrations
   end
 
+  defp repeatables! do
+    Path.wildcard(Path.join(@migration_dir, "R__tori_v12_*.sql"))
+    |> Enum.sort()
+  end
+
   # Reuse an older isolated test schema by applying only the new idempotent content seed.
   # ensure_target!/1 has already verified this is an explicitly configured *_test database.
   defp apply_v11_content_drop_if_missing!(migrations) do
@@ -214,6 +225,17 @@ defmodule ToriEconomy.TestSchema do
     end
   end
 
+  # Add the current forward-only social schema to an existing isolated test database.
+  # ensure_target!/1 has already verified this is an explicitly configured *_test database.
+  defp apply_v13_social_if_missing!(migrations) do
+    unless "economy_v2_social_action_cooldowns" in public_tables() do
+      case Enum.find(migrations, fn {version, _path} -> version == 13 end) do
+        {13, path} -> SQL.query!(Repo, File.read!(path), [], query_type: :text)
+        nil -> raise "Missing V13 social action cooldown migration in the test schema"
+      end
+    end
+  end
+
   defp public_tables do
     SQL.query!(Repo, "SELECT tablename FROM pg_tables WHERE schemaname = 'public'", []).rows
     |> Enum.map(&hd/1)
@@ -241,6 +263,21 @@ defmodule ToriEconomy.TestSchema do
 
     if missing_tables != [] or missing_indexes != [] do
       raise "Incomplete Tori test schema: missing tables #{inspect(missing_tables)}, indexes #{inspect(missing_indexes)}"
+    end
+
+    social_columns =
+      SQL.query!(
+        Repo,
+        "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='economy_v2_social_action_cooldowns'",
+        []
+      ).rows
+      |> Enum.map(&hd/1)
+
+    unless Enum.all?(
+             ~w(actor_user_id target_user_id action_code last_action_at_ms),
+             &(&1 in social_columns)
+           ) do
+      raise "Incomplete V13 social action cooldown schema in the isolated test database"
     end
 
     columns =

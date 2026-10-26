@@ -20,6 +20,33 @@ defmodule ToriEconomy.ContractTest do
     assert byte_size(request.fingerprint) == 64
   end
 
+  test "social actions use a registered action, a Discord target, and interaction idempotency" do
+    social = %{
+      @base
+      | "operation" => "social.action",
+        "context" => Map.put(@base["context"], "target_user_id", "456789012345678901"),
+        "args" => %{"action_id" => "hug"}
+    }
+
+    assert {:ok,
+            %{
+              operation: "social.action",
+              idempotency_key: "discord-interaction:123456789012345678"
+            }} =
+             Contract.validate(social)
+
+    assert {:error, "INVALID_TARGET"} =
+             Contract.validate(
+               put_in(social, ["context", "target_user_id"], "123456789012345678")
+             )
+
+    assert {:error, "INVALID_TARGET"} =
+             Contract.validate(Map.update!(social, "context", &Map.delete(&1, "target_user_id")))
+
+    assert {:error, "UNKNOWN_ACTION"} =
+             Contract.validate(put_in(social, ["args", "action_id"], "dance"))
+  end
+
   test "profile snapshot is a read with no mutation key or command-specific arguments" do
     profile = %{@base | "operation" => "profile.snapshot", "idempotency_key" => nil}
     assert {:ok, %{operation: "profile.snapshot"}} = Contract.validate(profile)

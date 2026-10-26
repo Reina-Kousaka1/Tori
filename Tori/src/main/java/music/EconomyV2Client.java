@@ -90,6 +90,11 @@ public final class EconomyV2Client {
                                  long retryAfterMillis) {
         public boolean succeeded() { return errorCode == null; }
     }
+    public record SocialActionResult(String errorCode, String actionId, String actorUserId,
+                                     String targetUserId, String socialEffect, long cooldownMillis,
+                                     long cooldownRemainingMillis, long retryAfterMillis) {
+        public boolean succeeded() { return errorCode == null; }
+    }
 
     public Response execute(Request request) throws IOException, InterruptedException {
         Map<String, Object> payload = new java.util.LinkedHashMap<>();
@@ -214,6 +219,35 @@ public final class EconomyV2Client {
                 decimal(result.path("balance"), "balance"), 0);
     }
 
+    public SocialActionResult socialAction(String interactionId, String actorId, String guildId,
+                                           String channelId, String actionId, String targetId)
+            throws IOException, InterruptedException {
+        var context = mutationContext(actorId, guildId, channelId, targetId);
+        Request request = Request.mutation(interactionId, "social.action", context,
+                Map.of("action_id", actionId));
+        JsonNode body = mutationResponse(request);
+        if ("error".equals(body.path("status").asText())) {
+            JsonNode error = body.path("error");
+            String code = text(error, "code");
+            if (!java.util.Set.of("READ_ONLY", "COOLDOWN_ACTIVE", "INVALID_TARGET", "UNKNOWN_ACTION",
+                    "INVALID_INPUT", "SERVICE_UNAVAILABLE", "INTERNAL_ERROR", "IDEMPOTENCY_CONFLICT")
+                    .contains(code))
+                throw new IOException("Unknown social response error");
+            long retry = nonnegativeInteger(error.path("details").path("retry_after_ms"), "retry_after_ms");
+            return new SocialActionResult(code, actionId, actorId, targetId, null, 0, 0, retry);
+        }
+
+        JsonNode result = body.path("result");
+        if (!"social_action".equals(result.path("type").asText())
+                || !actionId.equals(text(result, "action_id"))
+                || !actorId.equals(text(result, "actor_user_id"))
+                || !targetId.equals(text(result, "target_user_id")))
+            throw new IOException("Invalid economy social response");
+        return new SocialActionResult(null, actionId, actorId, targetId, text(result, "social_effect"),
+                decimal(result.path("cooldown_ms"), "cooldown_ms"),
+                decimal(result.path("cooldown_remaining_ms"), "cooldown_remaining_ms"), 0);
+    }
+
     private JsonNode mutationResponse(Request request) throws IOException, InterruptedException {
         Response response = execute(request);
         JsonNode body = response.body();
@@ -230,7 +264,7 @@ public final class EconomyV2Client {
         String code = text(error, "code");
         if (!java.util.Set.of("READ_ONLY", "INSUFFICIENT_FUNDS", "COOLDOWN_ACTIVE", "INVALID_AMOUNT",
                 "INVALID_TARGET", "INVALID_INPUT", "SERVICE_UNAVAILABLE", "INTERNAL_ERROR",
-                "IDEMPOTENCY_CONFLICT").contains(code))
+                "UNKNOWN_ACTION", "IDEMPOTENCY_CONFLICT").contains(code))
             throw new IOException("Unknown economy error response");
         JsonNode retry = error.path("details").path("retry_after_ms");
         long retryAfter = retry.isIntegralNumber() && retry.canConvertToLong() ? retry.longValue() : 0;
@@ -283,6 +317,17 @@ public final class EconomyV2Client {
         if (!value.isIntegralNumber() || !value.canConvertToInt())
             throw new IOException("Invalid economy response field: " + field);
         return value.intValue();
+    }
+
+    private static long nonnegativeInteger(JsonNode value, String field) throws IOException {
+        if (value.isMissingNode() || value.isNull()) return 0;
+        if (value.isTextual() && value.asText().matches("0|[1-9][0-9]*")) {
+            try { return Long.parseLong(value.asText()); }
+            catch (NumberFormatException ex) { throw new IOException("Economy value is out of range: " + field, ex); }
+        }
+        if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0)
+            throw new IOException("Invalid economy response field: " + field);
+        return value.longValue();
     }
 
     private static boolean bool(JsonNode object, String field) throws IOException {

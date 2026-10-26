@@ -3,6 +3,7 @@ package music;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.*;
 import net.dv8tion.jda.api.entities.channel.ChannelType;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.unions.MessageChannelUnion;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
@@ -27,6 +28,19 @@ final class CommandContext {
     Member getMember() { return slash != null ? slash.getMember() : message.getMember(); }
     JDA getJDA() { return slash != null ? slash.getJDA() : message.getJDA(); }
     MessageChannelUnion getChannel() { return slash != null ? slash.getChannel() : message.getChannel(); }
+    /**
+     * Resolve the attached guild text channel for operations that need bot permissions or a channel manager.
+     * JDA interaction channels may be detached snapshots, so they are not safe targets for those operations.
+     */
+    TextChannel getCachedTextChannel() {
+        if (slash == null) return message.getChannel().asTextChannel();
+        return cachedTextChannel(slash.getGuild(), slash.getChannel().getIdLong());
+    }
+    static TextChannel cachedTextChannel(Guild guild, long channelId) {
+        if (guild == null) return null;
+        TextChannel channel = guild.getTextChannelById(channelId);
+        return channel != null && channel.getIdLong() == channelId ? channel : null;
+    }
     ChannelType getChannelType() { return slash != null ? slash.getChannelType() : message.getChannelType(); }
     String getId() { return slash != null ? slash.getId() : message.getMessageId(); }
     long replyId() { return slash != null ? slash.getHook().retrieveOriginal().complete().getIdLong() : message.getMessageIdLong(); }

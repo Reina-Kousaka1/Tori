@@ -1,8 +1,34 @@
 defmodule ToriEconomy.Discord.NostrumConsumer do
-  @moduledoc "Opt-in preview gateway. Never registers or handles existing JDA commands."
+  @moduledoc "Nostrum consumer for the Elixir-owned Tori commands."
   use Nostrum.Consumer
   require Logger
   alias ToriEconomy.Discord.Adapter
+
+  def handle_event({:GUILD_MEMBER_ADD, {guild_id, member}, _state}) do
+    user = Map.get(member, :user)
+
+    if ToriEconomy.AutoMod.enabled?() and is_integer(guild_id) and is_map(user) and
+         is_integer(Map.get(user, :id)) and Map.get(user, :bot) != true do
+      ToriEconomy.AutoMod.observe_join(guild_id, user.id)
+    end
+  end
+
+  def handle_event({:MESSAGE_CREATE, message, _state}) do
+    author = Map.get(message, :author)
+    guild_id = Map.get(message, :guild_id)
+
+    if ToriEconomy.AutoMod.enabled?() and is_integer(guild_id) and is_map(author) and
+         is_integer(Map.get(author, :id)) and Map.get(author, :bot) != true do
+      ToriEconomy.AutoMod.observe_message(
+        guild_id,
+        author.id,
+        Map.get(message, :channel_id),
+        Map.get(message, :id),
+        Map.get(message, :content) || "",
+        length(Map.get(message, :mentions) || [])
+      )
+    end
+  end
 
   def handle_event({:INTERACTION_CREATE, interaction, _state}) do
     if Adapter.supported_interaction?(interaction) do
@@ -20,9 +46,9 @@ defmodule ToriEconomy.Discord.NostrumConsumer do
       _ -> :ok
     end
   rescue
-    _ -> Logger.warning("Could not acknowledge a Tori preview interaction")
+    _ -> Logger.warning("Could not acknowledge a Tori main-bot interaction")
   catch
-    _, _ -> Logger.warning("Could not acknowledge a Tori preview interaction")
+    _, _ -> Logger.warning("Could not acknowledge a Tori main-bot interaction")
   end
 
   def acknowledgement(interaction) do
@@ -48,10 +74,10 @@ defmodule ToriEconomy.Discord.NostrumConsumer do
     %{
       embeds: [
         %{
-          title: "Tori · Preview",
+          title: "Tori",
           description: content,
           color: 0xC5A15A,
-          footer: %{text: "Private test-guild preview"}
+          footer: %{text: "Tori economy"}
         }
       ],
       components: components,
@@ -69,16 +95,16 @@ defmodule ToriEconomy.Discord.NostrumConsumer do
     case result do
       {:ok, content} -> edit_interaction(interaction, content)
       {:error, content} -> edit_interaction(interaction, content)
-      :ignore -> edit_interaction(interaction, "This Tori preview interaction is not available.")
+      :ignore -> edit_interaction(interaction, "This Tori command is not available.")
     end
   rescue
     _ ->
-      Logger.warning("Tori preview domain request failed")
-      safe_edit_interaction(interaction, "This Tori preview is currently unavailable.")
+      Logger.warning("Tori main-bot command request failed")
+      safe_edit_interaction(interaction, "This Tori command is currently unavailable.")
   catch
     _, _ ->
-      Logger.warning("Tori preview domain request failed")
-      safe_edit_interaction(interaction, "This Tori preview is currently unavailable.")
+      Logger.warning("Tori main-bot command request failed")
+      safe_edit_interaction(interaction, "This Tori command is currently unavailable.")
   end
 
   defp edit_interaction(interaction, content) do

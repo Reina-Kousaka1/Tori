@@ -12,16 +12,16 @@ repositories {
 dependencies {
     implementation project(':database-api')
     implementation 'io.github.cdimascio:dotenv-java:3.2.0'
-    implementation 'net.dv8tion:JDA:6.5.0'
+    implementation 'net.dv8tion:JDA:6.7.0'
     implementation 'dev.arbjerg:lavalink-client:3.4.0'
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.20.1'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.22.3'
     implementation 'org.postgresql:postgresql:42.7.13'
     implementation 'com.zaxxer:HikariCP:7.0.2'
-    implementation 'org.flywaydb:flyway-core:13.8.0'
-    implementation 'org.flywaydb:flyway-database-postgresql:13.8.0'
+    implementation 'org.flywaydb:flyway-core:13.9.0'
+    implementation 'org.flywaydb:flyway-database-postgresql:13.9.0'
     testRuntimeOnly 'org.xerial:sqlite-jdbc:3.53.4.0'
-    runtimeOnly 'org.slf4j:slf4j-simple:2.0.17'
-    testImplementation platform('org.junit:junit-bom:5.11.4')
+    runtimeOnly 'org.slf4j:slf4j-simple:2.0.20'
+    testImplementation platform('org.junit:junit-bom:6.1.3')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -33,7 +33,7 @@ sourceSets {
     }
 }
 configurations.mongoMigrationImplementation.extendsFrom(configurations.implementation)
-dependencies { mongoMigrationImplementation 'org.mongodb:mongodb-driver-sync:5.6.1' }
+dependencies { mongoMigrationImplementation 'org.mongodb:mongodb-driver-sync:5.13.0' }
 java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
 application { mainClass = 'music.Main' }
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }

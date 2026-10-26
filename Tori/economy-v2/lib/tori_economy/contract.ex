@@ -19,7 +19,13 @@ defmodule ToriEconomy.Contract do
     "inventory.cosmetic.select",
     "inventory.cosmetic.clear",
     "career.select",
-    "career.practice"
+    "career.practice",
+    "marriage.propose",
+    "marriage.accept",
+    "marriage.decline",
+    "marriage.cancel",
+    "marriage.divorce",
+    "social.action"
   ]
   @reads [
     "wallet.balance",
@@ -30,6 +36,7 @@ defmodule ToriEconomy.Contract do
     "market.product",
     "market.history",
     "shop.rotation",
+    "shop.styles",
     "progression.snapshot",
     "marketplace.browse",
     "inventory.effects",
@@ -38,7 +45,8 @@ defmodule ToriEconomy.Contract do
     "career.snapshot",
     "inventory.item",
     "wardrobe.list",
-    "marketplace.inspect"
+    "marketplace.inspect",
+    "marriage.snapshot"
   ]
   @operations @mutations ++ @reads
 
@@ -55,6 +63,7 @@ defmodule ToriEconomy.Contract do
          :ok <- snowflake(context["channel_id"]),
          :ok <- optional_snowflake(context["target_user_id"]),
          :ok <- validate_args(operation, args),
+         :ok <- validate_social_target(operation, context, args),
          :ok <- validate_key(operation, raw["idempotency_key"]) do
       {:ok,
        %{
@@ -66,8 +75,12 @@ defmodule ToriEconomy.Contract do
          fingerprint: fingerprint(operation, context, args)
        }}
     else
-      {:error, code} when code in ["INVALID_AMOUNT", "INVALID_TARGET"] -> {:error, code}
-      _ -> {:error, "INVALID_INPUT"}
+      {:error, code}
+      when code in ["INVALID_AMOUNT", "INVALID_TARGET", "UNKNOWN_ACTION"] ->
+        {:error, code}
+
+      _ ->
+        {:error, "INVALID_INPUT"}
     end
   end
 
@@ -75,6 +88,17 @@ defmodule ToriEconomy.Contract do
 
   defp validate_args("wallet.balance", args), do: keys(args, [])
   defp validate_args("daily.claim", args), do: keys(args, [])
+
+  defp validate_args("social.action", args) do
+    with :ok <- keys(args, ["action_id"]),
+         action when is_binary(action) <- args["action_id"],
+         {:ok, _definition} <- ToriEconomy.Social.ActionRegistry.fetch(action) do
+      :ok
+    else
+      {:error, "UNKNOWN_ACTION"} -> {:error, "UNKNOWN_ACTION"}
+      _ -> {:error, "INVALID_INPUT"}
+    end
+  end
 
   defp validate_args(operation, args) when operation in ["inventory.list", "wardrobe.list"] do
     with :ok <- keys(args, ["category", "page"]),
@@ -93,7 +117,7 @@ defmodule ToriEconomy.Contract do
 
   defp validate_args("profile.snapshot", args), do: keys(args, [])
 
-  defp validate_args("shop.rotation", args) do
+  defp validate_args(operation, args) when operation in ["shop.rotation", "shop.styles"] do
     with :ok <- keys(args, ["category", "page"]),
          category when is_binary(category) <- Map.get(args, "category", "all"),
          true <- category == "all" or Regex.match?(~r/^[a-z0-9_-]{1,64}$/, category),
@@ -108,7 +132,7 @@ defmodule ToriEconomy.Contract do
     with :ok <- keys(args, ["item_id", "period_key"]),
          :ok <- item_id(args["item_id"]),
          key when is_binary(key) <- args["period_key"],
-         true <- Regex.match?(~r/^[0-9]{1,15}$/, key) do
+         true <- key == "catalog" or Regex.match?(~r/^[0-9]{1,15}$/, key) do
       :ok
     else
       _ -> {:error, "INVALID_INPUT"}
@@ -117,6 +141,24 @@ defmodule ToriEconomy.Contract do
 
   defp validate_args("inventory.cosmetics", args), do: keys(args, [])
   defp validate_args("career.snapshot", args), do: keys(args, [])
+
+  defp validate_args("marriage.snapshot", args), do: keys(args, [])
+
+  defp validate_args(operation, args)
+       when operation in [
+              "marriage.accept",
+              "marriage.decline",
+              "marriage.cancel",
+              "marriage.divorce"
+            ],
+       do: keys(args, [])
+
+  defp validate_args("marriage.propose", args) do
+    with :ok <- keys(args, ["target_user_id"]),
+         :ok <- snowflake(args["target_user_id"]) do
+      :ok
+    end
+  end
 
   defp validate_args("career.select", args) do
     with :ok <- keys(args, ["career_code"]),
@@ -208,7 +250,7 @@ defmodule ToriEconomy.Contract do
          :ok <- item_id(args["item_id"]),
          quantity when is_integer(quantity) and quantity in 1..100 <- args["quantity"],
          key when is_binary(key) <- args["period_key"],
-         true <- Regex.match?(~r/^[0-9]{1,15}$/, key) do
+         true <- key == "catalog" or Regex.match?(~r/^[0-9]{1,15}$/, key) do
       :ok
     else
       _ -> {:error, "INVALID_INPUT"}
@@ -219,7 +261,7 @@ defmodule ToriEconomy.Contract do
     with :ok <- keys(args, ["item_id", "slot"]),
          :ok <- item_id(args["item_id"]),
          slot
-         when slot in ~w(top bottom dress outerwear shoes bag accessory jewelry hair_accessory) <-
+         when slot in ~w(top bottom dress outerwear shoes bag accessory jewelry hair_accessory necklace earrings) <-
            args["slot"] do
       :ok
     else
@@ -230,7 +272,7 @@ defmodule ToriEconomy.Contract do
   defp validate_args("inventory.unequip", args) do
     with :ok <- keys(args, ["slot"]),
          slot
-         when slot in ~w(top bottom dress outerwear shoes bag accessory jewelry hair_accessory) <-
+         when slot in ~w(top bottom dress outerwear shoes bag accessory jewelry hair_accessory necklace earrings) <-
            args["slot"] do
       :ok
     else
@@ -354,6 +396,16 @@ defmodule ToriEconomy.Contract do
   defp snowflake(_), do: {:error, "INVALID_INPUT"}
   defp optional_snowflake(nil), do: :ok
   defp optional_snowflake(value), do: snowflake(value)
+
+  defp validate_social_target("social.action", context, args),
+    do:
+      ToriEconomy.Social.ActionRegistry.validate_target(
+        args["action_id"],
+        context["actor_user_id"],
+        context["target_user_id"]
+      )
+
+  defp validate_social_target(_, _, _), do: :ok
 
   defp keys(map, allowed) do
     if Enum.all?(Map.keys(map), &(&1 in allowed)), do: :ok, else: {:error, "INVALID_INPUT"}

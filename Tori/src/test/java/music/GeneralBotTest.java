@@ -44,6 +44,14 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GeneralBotTest {
+    @Test void shopOwnershipNeedsBothNostrumFlags() {
+        assertFalse(GeneralBot.shopOwnedByNostrum(Map.of()));
+        assertFalse(GeneralBot.shopOwnedByNostrum(Map.of("TORI_NOSTRUM_SHOP_ENABLED", "true")));
+        assertFalse(GeneralBot.shopOwnedByNostrum(Map.of("TORI_NOSTRUM_ENABLED", "true")));
+        assertTrue(GeneralBot.shopOwnedByNostrum(Map.of(
+            "TORI_NOSTRUM_ENABLED", "true", "TORI_NOSTRUM_SHOP_ENABLED", "true")));
+    }
+
     private static final long OWNER = 123456789012345678L;
     private static final long CALLER = 223456789012345678L;
     private static final long TEAM_OWNER = 323456789012345678L;
@@ -66,6 +74,15 @@ class GeneralBotTest {
                 () -> bot.handle(fixture.event("balance", CALLER), Language.EN));
             assertEquals("economy.unavailable", error.getMessage());
             assertTrue(bot.handle(fixture.event("ping", CALLER), Language.EN).contains("Bot (REST): 84 ms"));
+        }
+    }
+
+    @Test void socialActionsDoNotFallBackToJavaWhenTheDomainIsNotRoutedToElixir() throws Exception {
+        var fixture = new Fixture();
+        try (var bot = bot(new StatusRotation()).withEconomyRouting(EconomyRouting.legacy())) {
+            var error = assertThrows(UserError.class,
+                () -> bot.handle(fixture.event("hug", CALLER), Language.EN));
+            assertEquals("social.unavailable", error.getMessage());
         }
     }
 

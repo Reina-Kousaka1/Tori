@@ -12,6 +12,11 @@ services:
       POSTGRES_DB: tori_main
     volumes:
       - /mnt/tori/postgres:/var/lib/postgresql/data
+    networks:
+      default: {}
+      dbx-ops:
+        aliases:
+          - tori-postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
@@ -60,10 +65,10 @@ services:
       TORI_SHOP_ROTATION_HOURS: ${TORI_SHOP_ROTATION_HOURS:-24}
       TORI_SHOP_ROTATION_SIZE: ${TORI_SHOP_ROTATION_SIZE:-12}
       TORI_NOSTRUM_ENABLED: ${TORI_NOSTRUM_ENABLED:-false}
-      TORI_NOSTRUM_PREVIEW_ONLY: ${TORI_NOSTRUM_PREVIEW_ONLY:-false}
-      TORI_NOSTRUM_TOKEN: ${TORI_NOSTRUM_TOKEN:-}
-      TORI_NOSTRUM_APPLICATION_ID: ${TORI_NOSTRUM_APPLICATION_ID:-}
-      TORI_NOSTRUM_PREVIEW_GUILD_ID: ${TORI_NOSTRUM_PREVIEW_GUILD_ID:-}
+      TORI_NOSTRUM_SHOP_ENABLED: ${TORI_NOSTRUM_SHOP_ENABLED:-false}
+      TORI_AUTOMOD_ENABLED: ${TORI_AUTOMOD_ENABLED:-false}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:4001/internal/economy/v1/health"]
       interval: 20s
@@ -82,7 +87,7 @@ services:
     env_file: .env
     environment:
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
-      DISCORD_TOKEN: ${DISCORD_TOKEN:?Bot-Token in .env setzen}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
       BOT_RESTART_EXTERNAL: "true"
       BOT_OWNER_ID: ${BOT_OWNER_ID:-}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
@@ -93,8 +98,14 @@ services:
       TORI_DATABASE_PASSWORD: ${TORI_POSTGRES_PASSWORD:?PostgreSQL-Passwort in .env setzen}
       LAVALINK_URI: ws://lavalink:2333
       LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:?Passwort in .env setzen}
+      TORI_NOSTRUM_ENABLED: ${TORI_NOSTRUM_ENABLED:-false}
+      TORI_NOSTRUM_SHOP_ENABLED: ${TORI_NOSTRUM_SHOP_ENABLED:-false}
       TORI_ECONOMY_URL: http://economy-api:4001
       TORI_ECONOMY_API_SECRET: ${TORI_ECONOMY_API_SECRET:?Economy-API-Secret in .env setzen}
       TORI_ECONOMY_ROUTING: "${TORI_ECONOMY_ROUTING:-balance=LEGACY,inventory=LEGACY,shop=LEGACY,leaderboard=LEGACY,daily=LEGACY,transfer=LEGACY}"
 volumes:
   postgres-data:
+
+networks:
+  dbx-ops:
+    name: dbx-ops

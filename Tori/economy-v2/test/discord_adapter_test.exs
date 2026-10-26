@@ -4,7 +4,7 @@ defmodule ToriEconomy.Discord.AdapterTest do
   alias ToriEconomy.Dispatcher
   alias ToriEconomy.Discord.Adapter
   alias ToriEconomy.Discord.NostrumConsumer
-  alias ToriEconomy.Discord.PreviewCommands
+  alias ToriEconomy.Discord.Commands
 
   test "does not take ownership of existing JDA commands" do
     assert :ignore == Adapter.handle(%{data: %{name: "daily"}})
@@ -60,31 +60,30 @@ defmodule ToriEconomy.Discord.AdapterTest do
              })
   end
 
-  test "read-only preview routes cover the new domain surfaces without claiming JDA commands" do
-    commands = Adapter.preview_commands()
+  test "adapter exposes only main-bot commands and isolates the optional shop owner" do
+    base_commands = Enum.sort(~w(career divorce marriage marketplace marry profile wardrobe))
+    assert Enum.sort(Adapter.main_bot_commands(false)) == base_commands
+    assert Enum.sort(Adapter.main_bot_commands(true)) == Enum.sort(base_commands ++ ["shop"])
+    assert Enum.sort(Adapter.nostrum_commands()) == base_commands
 
-    assert Enum.sort(commands) ==
-             Enum.sort([
-               "profile",
-               "career",
-               "tori-profile-preview",
-               "tori-shop-preview",
-               "tori-wardrobe-preview",
-               "tori-marketplace-preview",
-               "tori-career-preview",
-               "tori-persona-preview",
-               "tori-consumable-preview",
-               "tori-activity-preview"
-             ])
+    jda_owned = ~w(buy equip inventory market sell shop)
+    assert [] == Enum.filter(base_commands, &(&1 in jda_owned))
+    assert Enum.filter(Adapter.main_bot_commands(true), &(&1 in jda_owned)) == ["shop"]
 
     assert :ignore == Adapter.handle(%{data: %{name: "marketplace"}})
+    assert :ignore == Adapter.handle(%{data: %{name: "tori-shop-preview"}})
   end
 
-  test "career and profile are Nostrum-only previews with complete command options" do
-    profile = Enum.find(PreviewCommands.definitions(), &(&1["name"] == "profile"))
+  test "the main-bot command definitions include career, profile and relationships" do
+    definitions = Commands.definitions(false)
+
+    assert Enum.sort(Enum.map(definitions, & &1["name"])) ==
+             Enum.sort(~w(career divorce marriage marketplace marry profile wardrobe))
+
+    profile = Enum.find(definitions, &(&1["name"] == "profile"))
     assert [%{"name" => "user", "type" => 6, "required" => false}] = profile["options"]
 
-    career = Enum.find(PreviewCommands.definitions(), &(&1["name"] == "career"))
+    career = Enum.find(definitions, &(&1["name"] == "career"))
 
     assert [%{"name" => "status"}, %{"name" => "select"}, activity, %{"name" => "practice"}] =
              career["options"]
@@ -164,7 +163,7 @@ defmodule ToriEconomy.Discord.AdapterTest do
   test "shop navigation reads the category/page and component IDs stay scoped to shop pages" do
     command = %{
       data: %{
-        name: "tori-shop-preview",
+        name: "shop",
         options: [
           %{
             name: "browse",
@@ -193,14 +192,64 @@ defmodule ToriEconomy.Discord.AdapterTest do
              })
   end
 
-  test "Nostrum acknowledges supported interactions before domain work" do
-    command = %{data: %{name: "tori-shop-preview"}}
+  test "shop item details do not present sold or unavailable items as buyable" do
+    response = %{
+      "status" => "ok",
+      "result" => %{
+        "type" => "shop_item",
+        "item_id" => "soft_lavender_cardigan",
+        "name" => "Soft Lavender Cardigan",
+        "description" => "Soft cardigan.",
+        "rarity" => "uncommon",
+        "unit_price" => "210",
+        "period_key" => "20260930",
+        "eligible" => true,
+        "state" => "unavailable",
+        "available" => false,
+        "remaining" => "0",
+        "owned_quantity" => "0",
+        "level_requirement" => 1,
+        "career_requirement" => nil,
+        "career_level_requirement" => 1,
+        "season" => nil
+      }
+    }
+
+    assert {:ok, sold} = Adapter.render_result(:shop, response, "123")
+    assert sold =~ "Sold out"
+    refute sold =~ "Available"
+
+    locked = put_in(response, ["result", "state"], "locked")
+    locked = put_in(locked, ["result", "eligible"], false)
+    locked = put_in(locked, ["result", "remaining"], nil)
+    locked = put_in(locked, ["result", "career_requirement"], "ballet")
+    locked = put_in(locked, ["result", "career_level_requirement"], 2)
+
+    assert {:ok, requirement} = Adapter.render_result(:shop, locked, "123")
+    assert requirement =~ "Locked"
+    assert requirement =~ "ballet level 2"
+  end
+
+  test "Nostrum acknowledges only Elixir-owned main-bot commands" do
+    career = %{data: %{name: "career"}}
+    profile = %{data: %{name: "profile"}}
     component = %{data: %{custom_id: "tori-shop-category"}}
-    refute Adapter.supported_interaction?(%{data: %{name: "shop"}})
-    assert Adapter.supported_interaction?(command)
-    assert Adapter.supported_interaction?(component)
-    assert NostrumConsumer.acknowledgement(command) == %{type: 5, data: %{flags: 64}}
-    assert NostrumConsumer.acknowledgement(component) == %{type: 6}
+
+    assert Enum.sort(Adapter.nostrum_commands()) ==
+             Enum.sort(~w(career divorce marriage marketplace marry profile wardrobe))
+
+    assert Adapter.supported_interaction?(career)
+    assert Adapter.supported_interaction?(profile)
+    assert Adapter.supported_interaction?(%{data: %{name: "marry"}})
+    refute Adapter.supported_interaction?(%{data: %{name: "daily"}})
+    refute Adapter.supported_interaction?(%{data: %{name: "status"}})
+    refute Adapter.supported_interaction?(%{data: %{name: "tori-shop-preview"}})
+    refute Adapter.supported_interaction?(component)
+    assert NostrumConsumer.acknowledgement(career) == %{type: 5, data: %{flags: 64}}
+    assert NostrumConsumer.acknowledgement(profile) == %{type: 5, data: %{flags: 64}}
+    refute Adapter.supported_interaction?(%{data: %{name: "tori-wardrobe-preview"}})
+    assert Adapter.supported_interaction?(%{data: %{name: "wardrobe"}})
+    assert Adapter.supported_interaction?(%{data: %{name: "marketplace"}})
   end
 
   test "consumer uses Nostrum's supervised start_link/1 child contract" do
@@ -250,35 +299,5 @@ defmodule ToriEconomy.Discord.AdapterTest do
     assert Enum.any?(page_row.components, &(&1.custom_id == "tori-shop-page:fashion:0"))
     assert Enum.any?(page_row.components, &(&1.custom_id == "tori-shop-page:fashion:2"))
     assert payload.allowed_mentions == %{parse: []}
-
-    shop_command = Enum.find(PreviewCommands.definitions(), &(&1["name"] == "tori-shop-preview"))
-    browse_command = Enum.find(shop_command["options"], &(&1["name"] == "browse"))
-    category_option = Enum.find(browse_command["options"], &(&1["name"] == "category"))
-    assert Enum.any?(category_option["choices"], &(&1["value"] == "all"))
-    page_option = Enum.find(browse_command["options"], &(&1["name"] == "page"))
-    assert page_option["type"] == 4
-    assert page_option["required"] == false
-    assert page_option["min_value"] == 0
-    assert page_option["max_value"] == 1000
-  end
-
-  test "Nostrum preview startup requires test mode and the exact connected test database" do
-    assert PreviewCommands.safe_test_database?("test", "tori_economy_test", "tori_economy_test")
-
-    refute PreviewCommands.safe_test_database?(
-             "production",
-             "tori_economy_test",
-             "tori_economy_test"
-           )
-
-    refute PreviewCommands.safe_test_database?("test", "tori_main", "tori_main")
-    refute PreviewCommands.safe_test_database?("test", "tori_economy_test", "tori_other_test")
-
-    assert PreviewCommands.configured_database(
-             url: "postgresql://preview@127.0.0.1:5433/tori_preview_test"
-           ) ==
-             "tori_preview_test"
-
-    assert PreviewCommands.configured_database(database: "tori_named_test") == "tori_named_test"
   end
 end

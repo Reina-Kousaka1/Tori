@@ -4,6 +4,7 @@ import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.audit.ThreadLocalReason;
 import net.dv8tion.jda.api.entities.*;
 import net.dv8tion.jda.api.entities.channel.ChannelType;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.interactions.commands.*;
 import net.dv8tion.jda.api.interactions.commands.build.*;
@@ -51,8 +52,9 @@ public final class ModerationBot extends CommandListener {
         Permission needed = PERMISSIONS.get(event.getName());
         if (event.getName().equals("snipe")) {
             require(event.getChannelType() == ChannelType.TEXT, "mod.text.channel");
-            var channel = event.getChannel().asTextChannel();
-            require(actor.hasPermission(channel, Permission.VIEW_CHANNEL, Permission.MESSAGE_HISTORY, needed),
+            var interactionChannel = event.getChannel().asTextChannel();
+            var channel = requireCachedTextChannel(event);
+            require(actor.hasPermission(interactionChannel, Permission.VIEW_CHANNEL, Permission.MESSAGE_HISTORY, needed),
                 "mod.actor.channel.permission", "View Channel, Read Message History, Manage Messages");
             require(bot.hasPermission(channel, Permission.VIEW_CHANNEL, Permission.MESSAGE_HISTORY), "mod.history.permission");
             var deleted = snipes.last(guild.getIdLong(), channel.getIdLong());
@@ -62,8 +64,9 @@ public final class ModerationBot extends CommandListener {
         boolean channelCommand = Set.of("purge", "slowmode").contains(event.getName());
         if (channelCommand) {
             require(event.getChannelType() == ChannelType.TEXT, "mod.text.channel");
-            var channel = event.getChannel().asTextChannel();
-            require(actor.hasPermission(channel, needed), "mod.actor.channel.permission", Messages.text(language, "perm." + needed.name()));
+            var interactionChannel = event.getChannel().asTextChannel();
+            var channel = requireCachedTextChannel(event);
+            require(actor.hasPermission(interactionChannel, needed), "mod.actor.channel.permission", Messages.text(language, "perm." + needed.name()));
             require(bot.hasPermission(channel, needed), "mod.bot.channel.permission", Messages.text(language, "perm." + needed.name()));
         } else {
             require(actor.hasPermission(needed), "mod.actor.permission", Messages.text(language, "perm." + needed.name()));
@@ -79,7 +82,7 @@ public final class ModerationBot extends CommandListener {
                 return completed(event, language, Messages.text(language, "mod.user", id), Messages.text(language, "mod.unbanned", id));
             }
             case "purge" -> {
-                var channel = event.getChannel().asTextChannel();
+                var channel = requireCachedTextChannel(event);
                 require(bot.hasPermission(channel, Permission.VIEW_CHANNEL, Permission.MESSAGE_HISTORY), "mod.history.permission");
                 int count = event.getOption("count").getAsInt();
                 require(count >= 1 && count <= 100, "mod.purge.range");
@@ -99,7 +102,8 @@ public final class ModerationBot extends CommandListener {
             case "slowmode" -> {
                 int seconds = event.getOption("seconds").getAsInt();
                 require(seconds >= 0 && seconds <= 21600, "mod.slowmode.range");
-                event.getChannel().asTextChannel().getManager().setSlowmode(seconds).reason(reason).complete();
+                var channel = requireCachedTextChannel(event);
+                channel.getManager().setSlowmode(seconds).reason(reason).complete();
                 return completed(event, language, Messages.text(language, "mod.slowmode.target", event.getChannel().getId(), seconds),
                     seconds == 0 ? Messages.text(language, "mod.slowmode.off") : Messages.text(language, "mod.slowmode.done", seconds));
             }
@@ -124,6 +128,13 @@ public final class ModerationBot extends CommandListener {
                 return completed(event, language, details, Messages.text(language, "mod.done", event.getName(), target.getId()));
             }
         }
+    }
+
+    private static TextChannel requireCachedTextChannel(CommandContext event) {
+        var interactionChannel = event.getChannel().asTextChannel();
+        var cachedChannel = event.getCachedTextChannel();
+        require(cachedChannel != null && cachedChannel.getIdLong() == interactionChannel.getIdLong(), "mod.channel.unavailable");
+        return cachedChannel;
     }
 
     private String completed(CommandContext event, Language language, String target, String result) {

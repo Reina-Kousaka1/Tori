@@ -230,6 +230,24 @@ defmodule ToriEconomy.ApiTest do
     response = request(valid)
     assert response.status == 403
     assert Jason.decode!(response.resp_body)["error"]["code"] == "READ_ONLY"
+
+    social =
+      Jason.encode!(%{
+        "request_id" => "927dfac0-0fb1-40de-96d0-5bad7b88ce7d",
+        "idempotency_key" => "discord-interaction:123456789012345679",
+        "operation" => "social.action",
+        "context" => %{
+          "actor_user_id" => "123",
+          "target_user_id" => "456",
+          "guild_id" => "234",
+          "channel_id" => "345"
+        },
+        "args" => %{"action_id" => "hug"}
+      })
+
+    social_response = request(social)
+    assert social_response.status == 403
+    assert Jason.decode!(social_response.resp_body)["error"]["code"] == "READ_ONLY"
     assert_raise RuntimeError, fn -> ToriEconomy.WriteGate.validate_startup!() end
   end
 
@@ -269,6 +287,7 @@ defmodule ToriEconomy.ApiTest do
     end)
 
     assert :ok = ToriEconomy.WriteGate.validate_startup!()
+    assert {:error, "READ_ONLY"} = ToriEconomy.WriteGate.authorize("social.action")
 
     transfer =
       Jason.encode!(%{
@@ -297,6 +316,7 @@ defmodule ToriEconomy.ApiTest do
         assert :ok = ToriEconomy.WriteGate.validate_startup!()
         assert {:error, "READ_ONLY"} = ToriEconomy.WriteGate.authorize("daily.claim")
         assert {:error, "READ_ONLY"} = ToriEconomy.WriteGate.authorize("wallet.transfer")
+        assert {:error, "READ_ONLY"} = ToriEconomy.WriteGate.authorize("social.action")
       end
     end)
   end

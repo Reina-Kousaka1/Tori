@@ -11,11 +11,10 @@ private Compose network and is not published on the host.
 can each be routed to the private Elixir API. All areas default to `LEGACY`.
 For the existing routed reads, Elixir returns neutral structured data and Java
 continues to render the production Discord output. `/stats` currently reports
-runtime/server metrics, not economy data, so it remains Java-owned. The newer
-`profile.snapshot`, catalog, rotation, wardrobe, progression, activity and
-marketplace domain operations are exposed through the isolated Nostrum preview;
-the Java `/profile` and existing production commands have not been routed to
-them.
+runtime/server metrics, not economy data, so it remains Java-owned. The newer `profile.snapshot`, career, catalog, rotation, wardrobe,
+progression, activity and marketplace domain operations are implemented in
+Elixir. Nostrum owns only the main-bot `/career` and `/profile` interactions;
+Java/JDA continues to own the existing command catalog, music and presence.
 
 The Elixir Persona foundation contains supervised transient mood state,
 deterministic seasonal overlays and semantic response rendering. It is
@@ -23,23 +22,23 @@ presentation-only: it cannot alter economy outcomes or permissions. The
 private authenticated `GET /internal/persona/v1/snapshot` and
 `POST /internal/persona/v1/events` endpoints expose state and accept only
 predefined event names. `POST /internal/persona/v1/render` returns a phrase
-from a semantic key, validated context and structured variables. The opt-in
-Nostrum preview uses this layer for preview responses; Java production
-commands and presence remain unchanged. See
+from a semantic key, validated context and structured variables. User Career
+state remains independent of the global Persona and Presence context; Java
+remains the only Presence writer. See
 `../docs/ELIXIR-REWRITE-STATUS.md` for ownership and remaining work.
 
-An optional Nostrum preview is available for a **separate test bot only**.
-It is disabled unless `TORI_NOSTRUM_ENABLED=true`,
-`TORI_NOSTRUM_PREVIEW_ONLY=true`, a dedicated test application/guild/token,
-`TORI_ECONOMY_WRITE_MODE=test`, and an explicit isolated `*_test` database are
-configured. Test writes also require `TORI_ECONOMY_WRITE_ENABLED=true`. In that
-explicit preview guild it registers `/profile` and `/career` plus uniquely
-named `tori-*-preview` helper commands. It supports shop category/page
-navigation, item details and test-gated purchases, profile, wardrobe,
-marketplace, careers, consumables, gathering activities and Persona previews.
-Interactions are acknowledged before domain work and edited ephemerally. It
-does not register commands on Tori's production JDA bot or change production
-command ownership. Never enable it with Tori's production bot token.
+The optional Nostrum integration uses the existing main-bot `DISCORD_TOKEN`
+and configured `DISCORD_GUILD_ID` when `TORI_NOSTRUM_ENABLED=true`. Missing
+token or guild configuration fails startup with a safe message; when the
+feature is disabled, neither value is required by Economy API. Nostrum
+registers and handles only `/career` and `/profile` in that guild. It does
+not register or handle Java commands. At startup, JDA checks its own command
+names and adds missing ones only. The explicit Java command registrar updates
+existing Java commands individually and does not delete Elixir-owned guild
+commands.
+Interactions are acknowledged before domain work and answered ephemerally.
+Career writes remain subject to the existing WriteGate and production
+allowlist.
 
 Routing can be set centrally, for example:
 
@@ -88,15 +87,19 @@ selected career's XP; Skill Level is a derived summary of XP across all active
 careers using the existing shared thresholds. Thus Skill Level adds no second
 persisted progression state. `/profile [user]` is a read-only aggregate of
 Credits, account XP/Level, derived Skill Level, selected Career XP/Level,
-equipped outfit and selected style. Relationship/Marriage is omitted until a
-real domain exists. Individual career actions do not record global Persona mood
+equipped outfit and selected style. The read-only profile also reads an active
+Relationship from the V12 Marriage domain; it stores no relationship copy.
+Individual career actions do not record global Persona mood
 events or change Tori's global Presence context.
 
-The `/profile` and `/career` Discord interactions are implemented through
-Nostrum/Elixir for the isolated preview bot and guild described above. No Java
-business logic or production JDA command registration is added; production
-routing and write gates remain unchanged. Career writes remain unavailable in
-production under the existing allowlist.
+The `/profile`, `/career`, `/wardrobe`, `/marketplace`, `/marry`,
+`/divorce` and `/marriage` commands are Elixir-owned and registered in the
+configured main-bot guild when Nostrum is enabled. Optional `TORI_NOSTRUM_SHOP_ENABLED=true` transfers only `/shop`
+slash-command ownership: Java excludes it from registration and interaction
+handling when both Nostrum flags are true, and Elixir registers the V12 Catalog
+and featured-drop UI. It defaults to false. Java's remaining commands,
+Music/Lavalink and technical Presence writer are unchanged. Production Shop,
+Career and Marriage mutations remain blocked by the current WriteGate allowlist.
 
 ## Writes and ownership
 
@@ -110,8 +113,8 @@ name, and a runtime check that the connected PostgreSQL database is also
 Production writes require a separate explicit mode, exact database-name match,
 successful Flyway V5 state, an operator acknowledgement, and an operation
 allowlist currently limited to daily and transfer. The production gate does not
-authorize new shop, inventory, activity, progression, career or marketplace
-mutations. These gates do not prove that a backup was restored or stop other
+authorize new shop, inventory, activity, progression, career, marriage or
+marketplace mutations. These gates do not prove that a backup was restored or stop other
 Java processes. Other Java commands still write the same global wallet rows,
 so production wallet writes remain blocked until all writers for that data
 area have been transferred or disabled under a reviewed ownership plan.
@@ -119,12 +122,36 @@ area have been transferred or disabled under a reviewed ownership plan.
 Mutation requests use the Discord interaction ID as a persistent idempotency
 key. Daily and transfer balance updates, ledger entries, and stored results
 share one PostgreSQL transaction. The current test harness applies the
-repository's additive V1–V12 Flyway SQL to an empty isolated test database; it
+repository's V1–V12 Flyway SQL and repeatable V12 scripts to an empty
+isolated test database; it
 does not apply migrations to production. V5 reuses `economy_accounts`; V6–V12
 add catalog, rotation, loadout, progression, marketplace, activity, consumable
-and career-action configuration without resetting existing player data. Do not
+and career-action configuration without resetting existing player data. The
+repeatable V12 scripts insert 51 new style IDs, add necklace and earring slots,
+and create the Marriage relationship table. Existing TEXT-array tags are reused. Do not
 deploy a bot image that auto-applies pending migrations until the backup/restore and schema
 review gates in the Pi guide have been completed.
+
+## V12 Shop and AutoMod gates
+
+The existing Java `/shop` and `/buy` use legacy Market products. V12 Catalog
+items were absent from that Discord purchase path. With optional Elixir `/shop`
+ownership, `/shop catalog` paginates active styles, `/shop browse` shows a
+persisted featured rotation, and `/shop item` and `/shop buy` accept an item ID.
+Catalog purchases reuse the account, ledger, inventory and idempotency
+transaction; a numeric featured period still checks rotation expiry and stock.
+Seasonal and limited-stock items retain their availability rules. `/wardrobe`
+uses existing Inventory/Equipment slots, and `/marketplace` uses existing
+listing escrow and purchase transactions. Java `/market`, `/equip` and tool
+commands remain Java-owned. This does not enable production wallet writes.
+
+`TORI_AUTOMOD_ENABLED=false` by default. When enabled with Nostrum, per-guild
+OTP processes detect join bursts, floods, mention spam and invite links.
+Detection cases reuse `moderation_cases` with action `AUTO_DETECT` and result
+`OBSERVED`; no ban, timeout or deletion is executed. Thresholds, allowlists
+and review/alert escalation are transient, with internal OTP configuration
+and overrides. Join and message-content detection requires privileged gateway
+intents for the Discord application. Keep this disabled until the release gate.
 
 ## Build, test, and deployment
 
@@ -133,10 +160,10 @@ review gates in the Pi guide have been completed.
 - Isolated PostgreSQL tests require `TORI_ECONOMY_TEST_DATABASE_URL` to point
   to a dedicated database ending in `_test`. Under `MIX_ENV=test`, the
   application starts its Repo from this URL and ignores production database
-  settings. `mix test` applies Tori's V1–V12 Flyway SQL files to a fresh, empty
+  settings. `mix test` applies Tori's V1–V12 Flyway SQL and repeatable V12 files to a fresh, empty
   test schema before running the integration tests; an incomplete nonempty
   schema fails verification instead of being silently modified. An older
-  isolated schema with V1–V11 can receive the additive V12 action config. The target
+  isolated schema with V1–V11 can receive the additive V12 action config and repeatables. The target
   URL, supervised Repo configuration and connected database name are checked
   before any schema write. Without the test URL, database integration tests
   are skipped. Never use production credentials or data for these tests.
@@ -148,11 +175,11 @@ PostgreSQL credentials used by Java, does not publish the API port, and creates
 no parallel database. The container health check uses the internal health
 route. See the [Raspberry Pi deployment and cutover guide](../docs/ECONOMY-API-PI-DEPLOYMENT.md).
 
-The rewrite's full integration suite, Discord preview and Docker release
-configuration have not been verified on this workstation. No production
-migration or write was run. Keep routes `LEGACY` and write mode `disabled`
-until the operator completes backup/restore, V1–V12 schema review and
-writer-ownership checks in the Pi guide.
+The main-bot Nostrum registration and Compose environment wiring have not been
+verified against live Discord in this environment. No production migration or
+write was run. Keep routes `LEGACY` and the write mode `disabled`; verify
+formatting, compilation, isolated database tests, Java tests and Compose
+configuration on the Raspberry Pi before enabling the feature.
 
 See `../docs/ECONOMY-V2-READINESS.md` for the parity, backup/restore, and
 writer-ownership audit.

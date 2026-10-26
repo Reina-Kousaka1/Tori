@@ -132,6 +132,7 @@ public final class Main implements AutoCloseable {
             .withStats(store, config.get("BOT_CREATOR", "")).withPrefixes(prefixes)
             .withPersona(new ToriPersona(ToriPersonaConfig.load(config)))
             .withPresenceSync(new ToriPresenceSync(config.toriPresenceClient()))
+            .withSocialGifProvider(SocialGifPool.fromJson(config.get("TORI_SOCIAL_GIF_URLS")))
             .withShutdown(this::requestShutdown);
         if (store instanceof PostgresBotStore postgres) {
             general.withCurrency(new PostgresCurrencyStore(postgres.database()));

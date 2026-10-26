@@ -29,6 +29,8 @@ final class ToriHelp {
             "inventory", "equip", "unequip", "tools", "iteminfo", "pricehistory");
         put(result, Section.ACTIVITIES, "beg", "work", "loot", "gamble", "slots", "fish", "mine",
             "chop", "craft", "repair", "opencrate");
+        put(result, Section.SOCIAL, "hug", "kiss", "pat", "cuddle", "poke", "slap", "bite", "tickle",
+            "highfive", "boop", "wave");
         put(result, Section.MODERATION, "snipe", "kick", "ban", "unban", "timeout", "untimeout", "purge", "slowmode");
         put(result, Section.TICKETS_ORDERS, "ticket", "order");
         put(result, Section.ADMIN, "restart", "shutdown", "uptime", "status", "grantcredits", "grantitem", "market");

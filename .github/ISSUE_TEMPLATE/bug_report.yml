@@ -1,0 +1,101 @@
+name: Bug report
+description: Report a reproducible problem in Tori.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **DO NOT INCLUDE:** Discord bot tokens, webhook URLs or tokens, database passwords, `.env` contents, or private user data. Redact secrets from logs and screenshots before submitting.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Summarize the problem and its impact.
+    validations:
+      required: true
+
+  - type: input
+    id: affected_command_domain
+    attributes:
+      label: Affected command or domain
+      description: Name the command or area, if known.
+      placeholder: "/play, /career, PostgreSQL, etc."
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the smallest reliable sequence that reproduces the issue.
+      placeholder: |
+        1. In this environment...
+        2. Run this command or action...
+        3. Observe the issue...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime_area
+    attributes:
+      label: Runtime / area
+      description: Select the closest match, if known.
+      options:
+        - Java / JDA
+        - Elixir / Nostrum
+        - PostgreSQL
+        - Discord interactions
+        - Music / Lavalink
+        - Economy
+        - Shop / Marketplace
+        - Inventory
+        - Career / Profile
+        - Moderation / Anti-Raid
+        - Orders
+        - Presence
+        - Infrastructure / Docker
+        - Other
+        - Not sure
+      default: 14
+    validations:
+      required: false
+
+  - type: input
+    id: version_commit
+    attributes:
+      label: Version or commit
+      description: Add a release/version or commit SHA if known.
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact tokens, credentials, private messages, and personal data before sharing.
+      render: shell
+    validations:
+      required: false
+
+  - type: upload
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Optional. Ensure screenshots contain no secrets or private user data.
+    validations:
+      required: false
