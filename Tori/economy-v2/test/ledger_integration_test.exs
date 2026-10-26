@@ -577,7 +577,7 @@ defmodule ToriEconomy.LedgerIntegrationTest do
 
     assert inventory["result"]["user_id"] == target
 
-    assert [%{"item_id" => "fish", "quantity" => "3", "name" => "fish"}] =
+    assert [%{"item_id" => "fish", "quantity" => "3", "name" => "Fish"}] =
              Enum.map(
                inventory["result"]["items"],
                &Map.take(&1, ["item_id", "quantity", "name"])

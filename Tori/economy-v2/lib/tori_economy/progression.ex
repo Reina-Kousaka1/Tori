@@ -516,7 +516,7 @@ defmodule ToriEconomy.Progression do
                  coalesce((
                    SELECT greatest(
                      0,
-                     a.cooldown_ms -
+                     x.cooldown_ms -
                        floor(extract(epoch FROM (now()-max(xp_event.occurred_at)))*1000)::bigint
                    )
                    FROM economy_v2_xp_events xp_event

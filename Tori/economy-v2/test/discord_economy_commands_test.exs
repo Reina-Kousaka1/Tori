@@ -75,7 +75,11 @@ defmodule ToriEconomy.Discord.EconomyCommandsTest do
   test "profile command can read another user's profile without changing the actor" do
     actor = snowflake()
     target = snowflake()
-    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,999),($2,123)", [actor, target])
+
+    Sql.query!("INSERT INTO economy_accounts(user_id,balance) VALUES ($1,999),($2,123)", [
+      actor,
+      target
+    ])
 
     interaction = %{
       data: %{name: "profile", options: [%{name: "user", value: String.to_integer(target)}]},

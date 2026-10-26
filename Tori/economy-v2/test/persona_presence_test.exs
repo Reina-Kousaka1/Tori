@@ -10,8 +10,12 @@ defmodule ToriEconomy.Persona.PresenceTest do
              Presence.snapshot(server, 1_000)
 
     assert {:ok, ballet} =
-             Presence.set_context("ballet", server: server, now_ms: 2_000,
-               special_event: "recital", ttl_seconds: 60)
+             Presence.set_context("ballet",
+               server: server,
+               now_ms: 2_000,
+               special_event: "recital",
+               ttl_seconds: 60
+             )
 
     assert ballet.activity == "ballet"
     assert ballet.special_event == "recital"
@@ -28,10 +32,19 @@ defmodule ToriEconomy.Persona.PresenceTest do
     on_exit(fn -> stop_server(server) end)
 
     assert {:error, :invalid} = Presence.set_context("individual_user_career", server: server)
-    assert {:error, :invalid} = Presence.set_context("cheer", server: server,
-      special_event: "event with spaces")
-    assert {:error, :invalid} = Presence.set_context("volleyball", server: server,
-      ttl_seconds: 59)
+
+    assert {:error, :invalid} =
+             Presence.set_context("cheer",
+               server: server,
+               special_event: "event with spaces"
+             )
+
+    assert {:error, :invalid} =
+             Presence.set_context("volleyball",
+               server: server,
+               ttl_seconds: 59
+             )
+
     assert Presence.snapshot(server, 1_000).revision == 0
   end
 
@@ -41,6 +54,7 @@ defmodule ToriEconomy.Persona.PresenceTest do
 
     assert {:ok, %{activity: "school", expires_at_ms: nil}} =
              Presence.set_context("school", server: server, now_ms: 2_000)
+
     assert Presence.snapshot(server, 100_000).activity == "school"
   end
 

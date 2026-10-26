@@ -314,12 +314,12 @@ public final class GeneralBot extends CommandListener {
                         var claim = economyRead(() -> economyV2Balance.dailyClaim(event.getId(), userId,
                             event.getGuild().getId(), event.getChannel().getId(),
                             user.getId().equals(userId) ? null : user.getId()));
-                        if (!claim.succeeded()) throw economyFailure(claim.errorCode(), claim.retryAfterMillis());
+                        if (!claim.succeeded()) throw economyFailure(claim.errorCode(), claim.retryAfterMillis(), language);
                         result = Messages.text(language, "economy.daily.claimed", claim.credits(), claim.balance());
                     } else {
                         long wait = currency.daily(user.getId(), clock.millis());
                         result = wait == 0 ? Messages.text(language, "economy.daily.claimed", 150, currency.balance(user.getId()))
-                            : Messages.text(language, "economy.daily.cooldown", Math.max(1, (wait + 59_999) / 60_000));
+                            : Messages.text(language, "economy.daily.cooldown", DailyCooldownFormatter.format(language, wait));
                     }
                     yield persona.decorate(result, ToriPersona.Context.SOCIAL_FUN, language);
                 }
@@ -502,17 +502,17 @@ public final class GeneralBot extends CommandListener {
             require(economyV2Balance != null, "economy.unavailable");
             var transfer = economyRead(() -> economyV2Balance.transfer(event.getId(), userId,
                 event.getGuild().getId(), event.getChannel().getId(), recipient.getId(), amount.getAsLong()));
-            if (!transfer.succeeded()) throw economyFailure(transfer.errorCode(), transfer.retryAfterMillis());
+            if (!transfer.succeeded()) throw economyFailure(transfer.errorCode(), transfer.retryAfterMillis(), language);
             return Messages.text(language, "currency.transfer.result", amount.getAsLong(), recipient.getAsMention());
         }
         require(currency.transfer(userId, recipient.getId(), amount.getAsLong()), "currency.transfer.failed");
         return Messages.text(language, "currency.transfer.result", amount.getAsLong(), recipient.getAsMention());
     }
 
-    private static UserError economyFailure(String code, long retryAfterMillis) {
+    private static UserError economyFailure(String code, long retryAfterMillis, Language language) {
         return switch (code) {
             case "COOLDOWN_ACTIVE" -> new UserError("economy.daily.cooldown",
-                Math.max(1, (retryAfterMillis + 59_999) / 60_000));
+                DailyCooldownFormatter.format(language, retryAfterMillis));
             case "INVALID_AMOUNT" -> new UserError("currency.amount");
             case "INVALID_TARGET", "INSUFFICIENT_FUNDS" -> new UserError("currency.transfer.failed");
             case "READ_ONLY" -> new UserError("economy.write.read_only");

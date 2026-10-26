@@ -85,6 +85,7 @@ defmodule ToriEconomy.Discord.AdapterTest do
     assert [%{"name" => "user", "type" => 6, "required" => false}] = profile["options"]
 
     career = Enum.find(PreviewCommands.definitions(), &(&1["name"] == "career"))
+
     assert [%{"name" => "status"}, %{"name" => "select"}, activity, %{"name" => "practice"}] =
              career["options"]
 

@@ -15,9 +15,11 @@ defmodule ToriEconomy.Persona.Presence do
 
   def start_link(opts) do
     name = Keyword.get(opts, :name, __MODULE__)
+
     state = %__MODULE__{
       updated_at_ms: Keyword.get(opts, :now_ms, System.system_time(:millisecond))
     }
+
     GenServer.start_link(__MODULE__, state, if(name, do: [name: name], else: []))
   end
 
@@ -51,11 +53,13 @@ defmodule ToriEconomy.Persona.Presence do
   def activities, do: @activities
 
   defp validate_special_event(nil), do: :ok
+
   defp validate_special_event(value) when is_binary(value) do
     if byte_size(value) <= 64 and Regex.match?(~r/^[A-Za-z0-9_-]+$/, value),
       do: :ok,
       else: {:error, :invalid}
   end
+
   defp validate_special_event(_), do: {:error, :invalid}
 
   defp validate_ttl(nil), do: :ok

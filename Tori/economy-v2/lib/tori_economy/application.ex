@@ -51,7 +51,7 @@ defmodule ToriEconomy.Application do
 
     discord_children =
       if System.get_env("TORI_NOSTRUM_ENABLED") == "true" do
-        token = System.fetch_env!("TORI_NOSTRUM_TOKEN")
+        token = System.fetch_env!("DISCORD_TOKEN")
         Nostrum.Token.check_token!(token)
         [ToriEconomy.Discord.PreviewGateway, ToriEconomy.Discord.PreviewCommands]
       else

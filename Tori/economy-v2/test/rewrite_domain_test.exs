@@ -269,6 +269,7 @@ defmodule ToriEconomy.RewriteDomainTest do
 
     assert Enum.at(careers["cheer"]["actions"], 3)["required_item_id"] ==
              "competition_day_ribbon_set"
+
     refute Enum.at(careers["ballet"]["actions"], 0)["available"]
 
     assert {:ok, _selected} =
@@ -354,14 +355,17 @@ defmodule ToriEconomy.RewriteDomainTest do
     user = snowflake()
     Sql.query!("INSERT INTO economy_accounts(user_id) VALUES ($1)", [user])
     Sql.query!("INSERT INTO economy_v2_account_progress(user_id,xp) VALUES ($1,99)", [user])
+
     Sql.query!(
       "INSERT INTO economy_v2_career_selections(user_id,career_code) VALUES ($1,'ballet')",
       [user]
     )
 
     before = ToriEconomy.Persona.Mood.snapshot()
+
     action =
       request("career.practice", user, %{"career_code" => "ballet", "action_code" => "class"})
+
     assert {:ok, result} = Dispatcher.execute(action)
     assert result["result"]["level_up"]
     after_state = ToriEconomy.Persona.Mood.snapshot()
@@ -672,6 +676,12 @@ defmodule ToriEconomy.RewriteDomainTest do
 
     assert {:ok, first} = Marketplace.execute(req)
     assert first["status"] == "ok"
+    listing_id = first["result"]["listing_id"]
+
+    on_exit(fn ->
+      Marketplace.execute(request("marketplace.cancel", user, %{"listing_id" => listing_id}))
+    end)
+
     assert {:ok, replay} = Marketplace.execute(%{req | request_id: Ecto.UUID.generate()})
     assert replay["result"] == first["result"]
 
@@ -906,6 +916,19 @@ defmodule ToriEconomy.RewriteDomainTest do
       [user]
     )
 
+    [[previous_effect, previous_duration, previous_active]] =
+      Sql.query!(
+        "SELECT effect_code,duration_ms,active FROM economy_v2_consumable_effects WHERE item_id=$1",
+        ["practice_water"]
+      ).rows
+
+    on_exit(fn ->
+      Sql.query!(
+        "UPDATE economy_v2_consumable_effects SET effect_code=$2,duration_ms=$3,active=$4 WHERE item_id=$1",
+        ["practice_water", previous_effect, previous_duration, previous_active]
+      )
+    end)
+
     Sql.query!("""
       INSERT INTO economy_v2_consumable_effects(item_id,effect_code,duration_ms,active)
       VALUES ('practice_water','test_refresh',60000,true)
@@ -983,7 +1006,7 @@ defmodule ToriEconomy.RewriteDomainTest do
     assert {:ok, replay} = Consumables.execute(%{consume | request_id: Ecto.UUID.generate()})
     assert replay["result"] == used["result"]
 
-    assert [[0]] =
+    assert [] =
              Sql.query!(
                "SELECT quantity FROM economy_inventory WHERE user_id=$1 AND item_id='practice_water'",
                [user]
