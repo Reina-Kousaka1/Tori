@@ -6,7 +6,7 @@
 [![Erlang/OTP 27.3.4.18](https://img.shields.io/badge/Erlang%2FOTP-27.3.4.18-A90533?logo=erlang&logoColor=white)](https://www.erlang.org/)
 [![Nostrum 0.10.4](https://img.shields.io/badge/Nostrum-0.10.4-6C3483)](https://hexdocs.pm/nostrum/0.10.4/)
 [![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![Gradle 9.8.0](https://img.shields.io/badge/Gradle-9.8.0-02303A?logo=gradle&logoColor=white)](https://gradle.org/)
+[![Gradle 9.8.2](https://img.shields.io/badge/Gradle-9.8.2-02303A?logo=gradle&logoColor=white)](https://gradle.org/)
 [![Lavalink audio](https://img.shields.io/badge/Lavalink-audio-7B68EE)](https://lavalink.dev/)
 [![License](https://img.shields.io/github/license/Reina-Kousaka1/Tori)](LICENSE)
 [![Open pull requests](https://img.shields.io/github/issues-pr/Reina-Kousaka1/Tori)](https://github.com/Reina-Kousaka1/Tori/pulls)

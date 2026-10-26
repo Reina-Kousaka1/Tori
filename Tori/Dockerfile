@@ -2,7 +2,7 @@ FROM node:24-bookworm-slim AS audio-node
 FROM gradle:9.8.2-jdk21 AS build
 WORKDIR /app
 COPY . .
-RUN gradle --no-daemon test installDist
+RUN ./gradlew --no-daemon clean build installDist
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
