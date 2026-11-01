@@ -141,6 +141,7 @@ class CommandListenerTest {
     @Test void closeDrainsRunningAndQueuedWorkBeforeReturning() throws Exception {
         var listener = listener();
         var workerStarted = new CountDownLatch(1);
+        var queuedWorkerStarted = new CountDownLatch(1);
         var releaseWorker = new CountDownLatch(1);
         var closeStarted = new CountDownLatch(1);
         var completed = new AtomicInteger();
@@ -158,7 +159,12 @@ class CommandListenerTest {
                 }
             });
             assertTrue(workerStarted.await(5, TimeUnit.SECONDS), "First task must be running");
-            listener.serial(1, completed::incrementAndGet);
+            listener.serial(1, () -> {
+                queuedWorkerStarted.countDown();
+                completed.incrementAndGet();
+            });
+            assertFalse(queuedWorkerStarted.await(100, TimeUnit.MILLISECONDS),
+                "Commands in one guild must remain ordered");
 
             var closed = closer.submit(() -> {
                 closeStarted.countDown();
@@ -169,6 +175,7 @@ class CommandListenerTest {
             releaseWorker.countDown();
             closed.get(5, TimeUnit.SECONDS);
 
+            assertEquals(0, queuedWorkerStarted.getCount(), "Queued guild work must run before close returns");
             assertEquals(2, completed.get(), "Running and queued tasks must finish before close returns");
             assertFalse(interrupted.get(), "Work completing within the grace period must not be interrupted");
         } finally {
@@ -176,6 +183,35 @@ class CommandListenerTest {
             listener.close();
             closer.shutdownNow();
             assertTrue(closer.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test void collidingGuildsHaveIndependentCommandQueuesAndBusyLimits() throws Exception {
+        var listener = listener();
+        var firstGuildStarted = new CountDownLatch(1);
+        var releaseFirstGuild = new CountDownLatch(1);
+        var secondGuildStarted = new CountDownLatch(1);
+        try {
+            assertTrue(listener.serialCommand(1, () -> {
+                firstGuildStarted.countDown();
+                try { releaseFirstGuild.await(); }
+                catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+            }));
+            assertTrue(firstGuildStarted.await(5, TimeUnit.SECONDS));
+
+            for (int i = 1; i < 32; i++) {
+                assertTrue(listener.serialCommand(1, () -> {}), "A guild may use its own command capacity");
+            }
+            assertFalse(listener.serialCommand(1, () -> {}), "One guild remains bounded at 32 pending commands");
+
+            // IDs 1 and 9 landed on the same worker stripe in the previous implementation.
+            assertTrue(listener.serialCommand(9, secondGuildStarted::countDown),
+                "One guild must not consume another guild's command slots");
+            assertTrue(secondGuildStarted.await(5, TimeUnit.SECONDS),
+                "A blocked guild must not hold up another guild with a colliding ID");
+        } finally {
+            releaseFirstGuild.countDown();
+            listener.close();
         }
     }
 

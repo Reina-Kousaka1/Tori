@@ -6,33 +6,112 @@ import net.dv8tion.jda.api.exceptions.ErrorResponseException;
 import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.components.actionrow.ActionRow;
 import org.slf4j.LoggerFactory;
+import java.util.ArrayDeque;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 
-/** Separate bounded worker stripes for music and moderation; never block JDA's gateway. */
+/** Bounded shared workers with independent per-guild command ordering; never block JDA's gateway. */
 public abstract class CommandListener extends ListenerAdapter implements AutoCloseable {
+    private static final int WORKER_COUNT = 8;
+    private static final int MAX_PENDING_COMMANDS_PER_GUILD = 32;
+    private static final int MAX_PENDING_COMMANDS_TOTAL = WORKER_COUNT * MAX_PENDING_COMMANDS_PER_GUILD;
+
+    private record QueuedWork(Runnable task, boolean command) {}
+    private static final class GuildWorkQueue {
+        final ArrayDeque<QueuedWork> tasks = new ArrayDeque<>();
+        int pendingCommands;
+        boolean running;
+    }
+
     private final Set<String> names;
     protected final LanguageStore languages;
-    private final ExecutorService[] workers = new ExecutorService[8];
-    private final Semaphore[] commandSlots = new Semaphore[8];
+    private final ExecutorService workers = Executors.newFixedThreadPool(WORKER_COUNT);
+    private final Object queueMonitor = new Object();
+    private final Map<Long, GuildWorkQueue> guildQueues = new HashMap<>();
+    private int pendingCommands;
     private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
     protected CommandListener(Set<String> names, LanguageStore languages) {
         this.names = names;
         this.languages = languages;
-        for (int i = 0; i < workers.length; i++) {
-            workers[i] = Executors.newSingleThreadExecutor();
-            commandSlots[i] = new Semaphore(32);
-        }
     }
     protected void serial(long guild, Runnable task) {
-        if (closed.get()) return;
-        try { workers[(Long.hashCode(guild) & Integer.MAX_VALUE) % workers.length].execute(() -> {
-            try { task.run(); }
-            catch (Exception ex) { LoggerFactory.getLogger(getClass()).warn("Aktion fehlgeschlagen ({})", ex.getClass().getSimpleName()); }
-        }); } catch (RejectedExecutionException ex) {
+        enqueue(guild, task, false);
+    }
+
+    boolean serialCommand(long guild, Runnable task) {
+        return enqueue(guild, task, true);
+    }
+
+    private boolean enqueue(long guild, Runnable task, boolean command) {
+        synchronized (queueMonitor) {
+            if (closed.get()) return false;
+            if (command && pendingCommands >= MAX_PENDING_COMMANDS_TOTAL) return false;
+
+            GuildWorkQueue queue = guildQueues.computeIfAbsent(guild, ignored -> new GuildWorkQueue());
+            if (command && queue.pendingCommands >= MAX_PENDING_COMMANDS_PER_GUILD) return false;
+
+            QueuedWork work = new QueuedWork(task, command);
+            queue.tasks.addLast(work);
+            if (command) {
+                queue.pendingCommands++;
+                pendingCommands++;
+            }
+            if (!queue.running) scheduleNext(guild, queue);
+            return true;
+        }
+    }
+
+    private void scheduleNext(long guild, GuildWorkQueue queue) {
+        QueuedWork next = queue.tasks.peekFirst();
+        if (next == null) {
+            queue.running = false;
+            guildQueues.remove(guild, queue);
+            queueMonitor.notifyAll();
+            return;
+        }
+
+        queue.running = true;
+        try {
+            workers.execute(() -> {
+                try { next.task().run(); }
+                catch (Exception ex) {
+                    LoggerFactory.getLogger(getClass()).warn("Aktion fehlgeschlagen ({})", ex.getClass().getSimpleName());
+                } finally {
+                    finish(guild, queue, next);
+                }
+            });
+        } catch (RejectedExecutionException ex) {
+            queue.running = false;
+            queue.tasks.removeFirst();
+            releaseCommandSlot(queue, next);
+            if (queue.tasks.isEmpty()) guildQueues.remove(guild, queue);
+            queueMonitor.notifyAll();
             if (!closed.get()) throw ex;
         }
+    }
+
+    private void finish(long guild, GuildWorkQueue queue, QueuedWork completed) {
+        synchronized (queueMonitor) {
+            if (guildQueues.get(guild) != queue) return;
+            queue.tasks.removeFirst();
+            releaseCommandSlot(queue, completed);
+            if (queue.tasks.isEmpty()) {
+                queue.running = false;
+                guildQueues.remove(guild, queue);
+                queueMonitor.notifyAll();
+            } else {
+                scheduleNext(guild, queue);
+            }
+        }
+    }
+
+    private void releaseCommandSlot(GuildWorkQueue queue, QueuedWork work) {
+        if (!work.command()) return;
+        queue.pendingCommands--;
+        pendingCommands--;
     }
     @Override public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
         if (closed.get()) return;
@@ -46,14 +125,8 @@ public abstract class CommandListener extends ListenerAdapter implements AutoClo
         // Acknowledge before consulting settings or submitting any command work.
         event.deferReply(false).queue(hook -> {
             Language initialLanguage = language(event);
-            var slots = commandSlots[(Long.hashCode(event.getGuild().getIdLong()) & Integer.MAX_VALUE) % workers.length];
-            if (!slots.tryAcquire()) {
-                hook.editOriginal(Messages.text(initialLanguage, "busy"))
-                    .queue(null, failure -> interactionFailure(event, "response", failure));
-                return;
-            }
             try {
-                serial(event.getGuild().getIdLong(), () -> {
+                boolean accepted = serialCommand(event.getGuild().getIdLong(), () -> {
                     try {
                         Language currentLanguage = language(event);
                         String message = null;
@@ -87,10 +160,13 @@ public abstract class CommandListener extends ListenerAdapter implements AutoClo
                         if (!components.isEmpty()) reply.setComponents(components);
                         reply.setAllowedMentions(List.of()).queue(ignored -> delivered.run(),
                             failure -> interactionFailure(event, "response", failure));
-                    } finally { slots.release(); }
                 });
+                if (!accepted) {
+                    String message = Messages.text(initialLanguage, closed.get() ? "shutting.down" : "busy");
+                    hook.editOriginal(message)
+                        .queue(null, failure -> interactionFailure(event, "response", failure));
+                }
             } catch (RejectedExecutionException ex) {
-                slots.release();
                 hook.editOriginal(Messages.text(initialLanguage, "shutting.down"))
                     .queue(null, failure -> interactionFailure(event, "response", failure));
             }
@@ -132,10 +208,8 @@ public abstract class CommandListener extends ListenerAdapter implements AutoClo
     void prefix(net.dv8tion.jda.api.events.message.MessageReceivedEvent message, String name, java.util.Map<String, String> options) {
         if (closed.get()) return;
         long guild = message.getGuild().getIdLong();
-        var slots = commandSlots[(Long.hashCode(guild) & Integer.MAX_VALUE) % workers.length];
-        if (!slots.tryAcquire()) return;
         try {
-            serial(guild, () -> {
+            serialCommand(guild, () -> {
                 try {
                     Language language = languages.get(message.getGuild().getId());
                     var context = new CommandContext(message, name, options);
@@ -165,29 +239,51 @@ public abstract class CommandListener extends ListenerAdapter implements AutoClo
                     if (!components.isEmpty()) reply.setComponents(components);
                     reply.setAllowedMentions(List.of()).queue(ignored -> callback.run(),
                         ex -> LoggerFactory.getLogger(getClass()).warn("Prefix response failed ({})", ex.getClass().getSimpleName()));
-                } finally { slots.release(); }
             });
-        } catch (RejectedExecutionException ex) { slots.release(); }
+        } catch (RejectedExecutionException ignored) { }
     }
     protected static void require(boolean condition, String key, Object... args) { if (!condition) throw new UserError(key, args); }
     protected static String clip(String value, int max) { return value == null ? "—" : value.substring(0, Math.min(max, value.length())); }
     @Override public void close() {
-        if (!closed.compareAndSet(false, true)) return;
-        for (var worker : workers) worker.shutdown();
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        try {
-            for (var worker : workers) {
-                long remaining = Math.max(0, deadline - System.nanoTime());
-                if (!worker.awaitTermination(remaining, TimeUnit.NANOSECONDS)) worker.shutdownNow();
+        boolean forceStop = false;
+        boolean interrupted = false;
+        synchronized (queueMonitor) {
+            if (!closed.compareAndSet(false, true)) return;
+            while (!guildQueues.isEmpty()) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) {
+                    forceStop = true;
+                    break;
+                }
+                try {
+                    TimeUnit.NANOSECONDS.timedWait(queueMonitor, remaining);
+                } catch (InterruptedException ex) {
+                    forceStop = true;
+                    interrupted = true;
+                    break;
+                }
             }
-            long interruptedDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            for (var worker : workers) {
-                long remaining = Math.max(0, interruptedDeadline - System.nanoTime());
-                if (!worker.awaitTermination(remaining, TimeUnit.NANOSECONDS))
-                    LoggerFactory.getLogger(getClass()).warn("Command worker did not terminate within the shutdown deadline.");
+            if (forceStop) {
+                workers.shutdownNow();
+                guildQueues.clear();
+                pendingCommands = 0;
+            } else {
+                workers.shutdown();
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+            return;
+        }
+        try {
+            if (!workers.awaitTermination(2, TimeUnit.SECONDS)) {
+                workers.shutdownNow();
+                if (!workers.awaitTermination(2, TimeUnit.SECONDS))
+                    LoggerFactory.getLogger(getClass()).warn("Command workers did not terminate within the shutdown deadline.");
             }
         } catch (InterruptedException ex) {
-            for (var worker : workers) worker.shutdownNow();
+            workers.shutdownNow();
             Thread.currentThread().interrupt();
         }
     }
