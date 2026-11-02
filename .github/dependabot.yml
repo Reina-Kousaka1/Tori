@@ -7,7 +7,60 @@ updates:
       day: monday
       time: "09:00"
       timezone: Europe/Berlin
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    cooldown:
+      semver-patch-days: 3
+      semver-minor-days: 7
+      semver-major-days: 21
+    groups:
+      flyway:
+        applies-to: version-updates
+        patterns:
+          - "org.flywaydb:flyway-*"
+        update-types:
+          - minor
+          - patch
+      database-drivers:
+        applies-to: version-updates
+        patterns:
+          - "org.postgresql:postgresql"
+          - "org.xerial:sqlite-jdbc"
+          - "org.mongodb:mongodb-driver-*"
+          - "com.mysql:mysql-connector-j"
+        update-types:
+          - minor
+          - patch
+      discord-music:
+        applies-to: version-updates
+        patterns:
+          - "net.dv8tion:JDA"
+          - "dev.arbjerg:lavalink-client"
+        update-types:
+          - minor
+          - patch
+      java-tests:
+        applies-to: version-updates
+        patterns:
+          - "org.junit:*"
+        update-types:
+          - minor
+          - patch
+      java-runtime:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "org.flywaydb:flyway-*"
+          - "org.postgresql:postgresql"
+          - "org.xerial:sqlite-jdbc"
+          - "org.mongodb:mongodb-driver-*"
+          - "com.mysql:mysql-connector-j"
+          - "net.dv8tion:JDA"
+          - "dev.arbjerg:lavalink-client"
+          - "org.junit:*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: mix
     directory: "/Tori/economy-v2"
@@ -16,7 +69,19 @@ updates:
       day: monday
       time: "09:00"
       timezone: Europe/Berlin
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    cooldown:
+      semver-patch-days: 3
+      semver-minor-days: 7
+      semver-major-days: 21
+    groups:
+      elixir-non-major:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: docker
     directory: "/Tori"
@@ -25,7 +90,9 @@ updates:
       day: monday
       time: "09:00"
       timezone: Europe/Berlin
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 5
 
   - package-ecosystem: docker
     directory: "/Tori/economy-v2"
@@ -34,7 +101,9 @@ updates:
       day: monday
       time: "09:00"
       timezone: Europe/Berlin
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 5
 
   - package-ecosystem: docker-compose
     directory: "/Tori"
@@ -43,4 +112,6 @@ updates:
       day: monday
       time: "09:00"
       timezone: Europe/Berlin
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 5
