@@ -127,39 +127,38 @@ public abstract class CommandListener extends ListenerAdapter implements AutoClo
             Language initialLanguage = language(event);
             try {
                 boolean accepted = serialCommand(event.getGuild().getIdLong(), () -> {
+                    Language currentLanguage = language(event);
+                    String message = null;
+                    MessageEmbed embed = null;
+                    List<ActionRow> components = List.of();
+                    Runnable onDelivered = () -> {};
                     try {
-                        Language currentLanguage = language(event);
-                        String message = null;
-                        MessageEmbed embed = null;
-                        List<ActionRow> components = List.of();
-                        Runnable onDelivered = () -> {};
-                        try {
-                            var context = new CommandContext(event);
-                            var view = handleView(context, currentLanguage);
-                            if (view != null) {
-                                embed = view.embed();
-                                components = view.components();
-                            } else {
-                                embed = handleEmbed(event, currentLanguage);
-                                if (embed == null) message = handle(event, currentLanguage);
-                                components = replyComponents(context, currentLanguage);
-                            }
-                            onDelivered = afterReply(event);
+                        var context = new CommandContext(event);
+                        var view = handleView(context, currentLanguage);
+                        if (view != null) {
+                            embed = view.embed();
+                            components = view.components();
+                        } else {
+                            embed = handleEmbed(event, currentLanguage);
+                            if (embed == null) message = handle(event, currentLanguage);
+                            components = replyComponents(context, currentLanguage);
                         }
-                        catch (UserError ex) { message = ex.localized(currentLanguage); }
-                        catch (IllegalArgumentException ex) { message = Messages.text(currentLanguage, "error.input"); }
-                        catch (ErrorResponseException ex) { message = Messages.text(currentLanguage, "error.discord", ex.getErrorCode()); }
-                        catch (Exception ex) {
-                            // Include source locations without exception messages, which may contain credentials.
-                            LoggerFactory.getLogger(getClass()).warn("Command {} failed ({}) at {}", event.getName(),
-                                ex.getClass().getSimpleName(), java.util.Arrays.toString(ex.getStackTrace()));
-                            message = Messages.text(currentLanguage, "error.generic");
-                        }
-                        Runnable delivered = onDelivered;
-                        var reply = embed == null ? hook.editOriginal(clip(message, 1950)) : hook.editOriginalEmbeds(embed);
-                        if (!components.isEmpty()) reply.setComponents(components);
-                        reply.setAllowedMentions(List.of()).queue(ignored -> delivered.run(),
-                            failure -> interactionFailure(event, "response", failure));
+                        onDelivered = afterReply(event);
+                    }
+                    catch (UserError ex) { message = ex.localized(currentLanguage); }
+                    catch (IllegalArgumentException ex) { message = Messages.text(currentLanguage, "error.input"); }
+                    catch (ErrorResponseException ex) { message = Messages.text(currentLanguage, "error.discord", ex.getErrorCode()); }
+                    catch (Exception ex) {
+                        // Include source locations without exception messages, which may contain credentials.
+                        LoggerFactory.getLogger(getClass()).warn("Command {} failed ({}) at {}", event.getName(),
+                            ex.getClass().getSimpleName(), java.util.Arrays.toString(ex.getStackTrace()));
+                        message = Messages.text(currentLanguage, "error.generic");
+                    }
+                    Runnable delivered = onDelivered;
+                    var reply = embed == null ? hook.editOriginal(clip(message, 1950)) : hook.editOriginalEmbeds(embed);
+                    if (!components.isEmpty()) reply.setComponents(components);
+                    reply.setAllowedMentions(List.of()).queue(ignored -> delivered.run(),
+                        failure -> interactionFailure(event, "response", failure));
                 });
                 if (!accepted) {
                     String message = Messages.text(initialLanguage, closed.get() ? "shutting.down" : "busy");
@@ -210,35 +209,34 @@ public abstract class CommandListener extends ListenerAdapter implements AutoClo
         long guild = message.getGuild().getIdLong();
         try {
             serialCommand(guild, () -> {
+                Language language = languages.get(message.getGuild().getId());
+                var context = new CommandContext(message, name, options);
+                MessageEmbed embed = null;
+                String text = null;
+                List<ActionRow> components = List.of();
+                Runnable delivered = () -> {};
                 try {
-                    Language language = languages.get(message.getGuild().getId());
-                    var context = new CommandContext(message, name, options);
-                    MessageEmbed embed = null;
-                    String text = null;
-                    List<ActionRow> components = List.of();
-                    Runnable delivered = () -> {};
-                    try {
-                        var view = handleView(context, language);
-                        if (view != null) {
-                            embed = view.embed();
-                            components = view.components();
-                        } else {
-                            embed = handleEmbed(context, language);
-                            if (embed == null) text = handle(context, language);
-                            components = replyComponents(context, language);
-                        }
-                        delivered = afterReply(context);
-                    } catch (UserError ex) { text = ex.localized(language); }
-                    catch (IllegalArgumentException ex) { text = Messages.text(language, "error.input"); }
-                    catch (Exception ex) {
-                        LoggerFactory.getLogger(getClass()).warn("Prefix command {} failed ({})", name, ex.getClass().getSimpleName());
-                        text = Messages.text(language, "error.generic");
+                    var view = handleView(context, language);
+                    if (view != null) {
+                        embed = view.embed();
+                        components = view.components();
+                    } else {
+                        embed = handleEmbed(context, language);
+                        if (embed == null) text = handle(context, language);
+                        components = replyComponents(context, language);
                     }
-                    var reply = embed == null ? message.getChannel().sendMessage(clip(text, 1950)) : message.getChannel().sendMessageEmbeds(embed);
-                    Runnable callback = delivered;
-                    if (!components.isEmpty()) reply.setComponents(components);
-                    reply.setAllowedMentions(List.of()).queue(ignored -> callback.run(),
-                        ex -> LoggerFactory.getLogger(getClass()).warn("Prefix response failed ({})", ex.getClass().getSimpleName()));
+                    delivered = afterReply(context);
+                } catch (UserError ex) { text = ex.localized(language); }
+                catch (IllegalArgumentException ex) { text = Messages.text(language, "error.input"); }
+                catch (Exception ex) {
+                    LoggerFactory.getLogger(getClass()).warn("Prefix command {} failed ({})", name, ex.getClass().getSimpleName());
+                    text = Messages.text(language, "error.generic");
+                }
+                var reply = embed == null ? message.getChannel().sendMessage(clip(text, 1950)) : message.getChannel().sendMessageEmbeds(embed);
+                Runnable callback = delivered;
+                if (!components.isEmpty()) reply.setComponents(components);
+                reply.setAllowedMentions(List.of()).queue(ignored -> callback.run(),
+                    ex -> LoggerFactory.getLogger(getClass()).warn("Prefix response failed ({})", ex.getClass().getSimpleName()));
             });
         } catch (RejectedExecutionException ignored) { }
     }
