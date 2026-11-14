@@ -2,7 +2,7 @@
 
 Tori ist ein Hybridprojekt aus Java/JDA und Elixir/Nostrum. Java 21/JDA betreibt die bestehenden Java-Systeme, darunter Musik/Lavalink, Moderation, Tickets, Orders und den technischen Presence-Writer. Elixir besitzt nur ausdrücklich zugewiesene Hauptbot-Interaktionen. Dieses Handbuch behandelt Java und Docker; Architektur und Entwicklungsablauf stehen in der [Repository-Übersicht](../README.md) und im [Contributor Guide](../CONTRIBUTING.md).
 
-Die Java-Komponente nutzt Gradle (Groovy DSL), JDA 6.5.0, Lavalink 4.2.2 mit DAVE und LavaSrc 4.8.3. Der Lavalink-Client bringt intern weiterhin
+Die Java-Komponente nutzt Java 21, Gradle 9.8.2 (Groovy DSL), JDA 6.7.0, Lavalink 4.2.2 mit DAVE und LavaSrc 4.8.3. Der Lavalink-Client bringt intern weiterhin
 seine Kotlin-Laufzeit mit; du musst weder Kotlin installieren noch Kotlin-Code bearbeiten.
 Bot-Antworten, Hilfe, Eingabefehler, Moderationsmeldungen und Webhook-Modlogs unterstützen Deutsch,
 Englisch und Niederländisch.

@@ -1,0 +1,66 @@
+name: Java 21 verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Tori/**'
+      - '.github/workflows/java21.yml'
+  pull_request:
+    paths:
+      - 'Tori/**'
+      - '.github/workflows/java21.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gradle-java-21:
+    name: Gradle tests and distribution on Java 21
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: Tori
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            Tori/gradle/wrapper/gradle-wrapper.properties
+            Tori/**/*.gradle
+      - name: Verify runtime and Gradle
+        run: |
+          java -version
+          ./gradlew --version
+      - name: Run all Gradle tests and package the distribution
+        run: ./gradlew --no-daemon test installDist
+
+  arm64-container-build:
+    name: Build ARM64 Java 21 container without publishing
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build ARM64 image without pushing
+        run: >-
+          docker buildx build
+          --platform linux/arm64
+          --file Tori/Dockerfile
+          --tag tori:java21-arm64
+          --progress plain
+          --output type=oci,dest=/tmp/tori-java21-arm64.tar
+          Tori
